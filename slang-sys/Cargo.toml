@@ -9,9 +9,13 @@ categories = ["compilers", "external-ffi-bindings"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
+link-cplusplus = { version = "1", optional = true }
 
 [build-dependencies]
 bindgen = "0.72.0"
 
 [features]
+default = ["dynamic"]
+dynamic = []
+static = ["dep:link-cplusplus"]
 serde = ["dep:serde"]
