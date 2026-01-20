@@ -58,7 +58,7 @@ fn main() {
 		println!("cargo:rustc-link-search=native={}", lz4_lib_dir.display());
 
 		// Link the core Slang static libraries
-		println!("cargo:rustc-link-lib=static=slang");
+		println!("cargo:rustc-link-lib=static=slang-compiler");
 		println!("cargo:rustc-link-lib=static=compiler-core");
 		println!("cargo:rustc-link-lib=static=core");
 		// External slang dependencies
