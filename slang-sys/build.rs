@@ -51,11 +51,13 @@ fn main() {
 		};
 		let miniz_lib_dir = Path::new(&external_lib_dir).join("miniz/Release/");
 		let lz4_lib_dir = Path::new(&external_lib_dir).join("lz4/build/cmake/Release/");
+		let cmark_lib_dir = Path::new(&external_lib_dir).join("cmark/src/Release/");
 
 		// Add Slang static library search path
 		println!("cargo:rustc-link-search=native={}", lib_dir);
 		println!("cargo:rustc-link-search=native={}", miniz_lib_dir.display());
 		println!("cargo:rustc-link-search=native={}", lz4_lib_dir.display());
+		println!("cargo:rustc-link-search=native={}", cmark_lib_dir.display());
 
 		// Link the core Slang static libraries
 		println!("cargo:rustc-link-lib=static=slang-compiler");
@@ -64,6 +66,7 @@ fn main() {
 		// External slang dependencies
 		println!("cargo:rustc-link-lib=static=miniz");
 		println!("cargo:rustc-link-lib=static=lz4");
+		println!("cargo:rustc-link-lib=static=cmark-gfm");
 	}
 
 	let out_dir = env::var("OUT_DIR").expect("Couldn't determine output directory.");
