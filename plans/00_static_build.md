@@ -146,8 +146,11 @@ Add `slang-sys/vendor/` on release branches only, holding one archive per platfo
     vendor/slang-static-<version>-windows-x86_64.tar.gz
 
 Vendor the `.tar.gz` exactly as published, so each blob's SHA-256 can be checked
-against the GitHub release asset. Recompressing to xz would save space but breaks
-that provenance check; revisit only if size forces it.
+against the GitHub release asset. Recompressing to xz would save roughly 40% —
+PR #3 measured the Linux archive at 21.6 MB with `gzip -9` against 13.4 MB with
+`xz -9`, and the workflow packages at gzip's default level, so the real gap is
+wider — but it breaks that provenance check. Start with the published `.tar.gz`;
+revisit if the Windows size investigation leaves us needing the space.
 
 Record the source release tag and each SHA-256 in a committed manifest. Plain git
 blobs only — Cargo git dependencies do not resolve LFS pointers.
@@ -230,13 +233,26 @@ them. Grep `shaders/source/` before switching.
 
 Both must be resolved before step 2, since they determine what we vendor:
 
-- **`Giesch/slang` PR #3 must be merged and a release tagged.** No archive exists
-  to vendor until the publish path has actually run — it has been skipped on every
-  job so far because the PR is a draft.
+- **A static release must be tagged in `Giesch/slang`.**
+  [PR #3](https://github.com/Giesch/slang/pull/3) merged to `master` on
+  2026-07-31, so `release-static.yml` is now live there and a matching tag push
+  will fire it. Nothing has been published yet — the four existing releases
+  (`v2026.13.1`, `v2026.13`, `v2026.1.1`, `v2026.1-static`) all predate the merge,
+  and the publish step has been skipped on every run so far.
+
+  Tag naming needs care. The workflow derives archive names from
+  `${GITHUB_REF_NAME#v}`, and the upstream-inherited `v2026.13` / `v2026.13.1`
+  tags already exist, so the static release needs a distinct one. Follow the
+  repository's own prior art and suffix it: `v2026.13.1-static` matches the
+  trigger pattern and mirrors the existing `v2026.1-static`. A first pass tagged
+  `v2026.13.1-static-draft` publishes as draft + prerelease, which exercises the
+  never-yet-run publish path without committing to a public release.
+
 - **The Windows archive size anomaly must be understood.** 141 MB versus 44 MB on
   Linux suggests debug records are still embedded per-object despite
   `SLANG_ENABLE_RELEASE_DEBUG_INFO=OFF`. A blocker for vendoring specifically,
-  because it lands in git history permanently.
+  because it lands in git history permanently. Reconcile against PR #3's measured
+  Linux baseline while investigating: 76.6 MB stripped, 21.6 MB at `gzip -9`.
 
 ## Risks
 
