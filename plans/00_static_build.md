@@ -19,10 +19,9 @@ divergence is deliberate and we keep it. Freed from upstream's constraints we ca
 also drop the mutually-exclusive feature design and check in generated bindings,
 both of which upstream is still litigating.
 
-**Archives are vendored into the repo, not downloaded at build time.** Cargo git
-dependencies are not target-filtered, so every consumer clones all platforms'
-archives regardless of what they build for. We accept that cost in exchange for
-reproducible, offline, network-free builds. See "Repository growth" under Risks.
+**Archives are vendored into the repo, not downloaded at build time.** Reproducible,
+offline, network-free builds. To keep the blobs out of `main`'s history they live
+only on release branches — see "Where the archives live" below.
 
 ## Where things stand
 
@@ -32,20 +31,86 @@ pointing at a Slang **source build tree**, and hardcodes three paths into it:
     miniz/Release/        lz4/build/cmake/Release/        cmark/src/Release/
 
 Those `Release/` segments are MSVC multi-config generator layout. Under Ninja or
-Make — our Linux and macOS builds — the libraries land directly in `miniz/`,
-`lz4/build/cmake/` and `cmark/src/` with no `Release/` component. **The current
-static path only works against a Windows/MSVC source build.**
+Make — our Linux and macOS builds — the libraries land one directory up. **The
+current static path only works against a Windows/MSVC source build.**
 
 Already in place and not part of this work:
 
 - `link-cplusplus` is an optional dependency enabled by `static`, so the C++
-  runtime (`stdc++` / `c++`) is handled. `m`, `pthread` and `dl` arrive via Rust's
-  own libc linkage on Linux.
+  runtime (`stdc++` / `c++`) is handled.
 - The `slang` → `slang-compiler` rename that blocks upstream #25 was fixed here in
   40be816.
 
 Missing: `links = "slang"`, `-DSLANG_STATIC` in the bindgen clang args, and any
 notion of an archive.
+
+## What the archives actually contain
+
+Confirmed against `release-static.yml`. This differs from what a source build
+produces and drove several corrections to this plan.
+
+`SLANG_BUNDLE_STATIC_LIB=ON` merges everything into **one** archive per platform:
+`libslang-static.a` on Unix, `slang-static.lib` on Windows. The staging step ships
+that single file and deliberately excludes `libslang-compiler.a`, which is
+installed alongside but cannot be linked on its own. So the packaged `lib/`
+contains exactly one library — not the six that the current `build.rs` links
+individually.
+
+Three platforms ship, named by the workflow's own labels rather than Rust triples:
+
+| workflow platform | Rust target triple | notes |
+| --- | --- | --- |
+| `linux-x86_64` | `x86_64-unknown-linux-gnu` | built in `manylinux_2_28` for the glibc floor |
+| `macos-aarch64` | `aarch64-apple-darwin` | native arm64, `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` |
+| `windows-x86_64` | `x86_64-pc-windows-msvc` | `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL` |
+
+Packaged as `slang-static-<version>-<platform>.tar.gz` and `.zip`, each expanding
+to `lib/`, `include/`, `licenses/`.
+
+**`slang-glslang` is not dynamically loaded.** The build sets
+`SLANG_EMBED_SLANG_GLSLANG=ON` with `SLANG_ENABLE_SLANG_GLSLANG=OFF`, and a
+dedicated workflow step runs `ldd` / `otool -L` / `dumpbin //dependents` against
+`slangc`, failing if `slang-glslang` or `slang-compiler` appears. The smoke test
+covers `-O3`, `spirv-asm` and SPIR-V validation specifically because `-O0` emits
+SPIR-V natively and would not exercise the embedded wrapper. The concern raised on
+upstream #25 (shader-slang/slang#10652) is therefore already closed for us, by
+construction and with a regression check.
+
+The workflow's own consumer link check also pins down what a consumer must pass:
+`-DSLANG_STATIC`, plus `-lstdc++ -lm -lpthread -ldl` on Linux and `-lc++ -lm
+-lpthread` on macOS.
+
+## Where the archives live
+
+Keeping ~40 MB of already-compressed blobs out of `main` while still shipping them
+through a plain Cargo git dependency:
+
+- `main` holds source only, no archives, ever.
+- Each release branches `release/vX` from a `main` commit, adds
+  `slang-sys/vendor/`, commits, and tags. **The release commit is never merged
+  back into `main`.**
+- Consumers pin `tag = "vX"` rather than `branch = "main"`.
+
+This works because Cargo fetches a git dependency with a targeted refspec derived
+from the manifest reference — `refs/heads/<branch>` for `branch`, `refs/tags/<tag>`
+for `tag` — rather than mirroring the repository. Archive blobs are reachable only
+from release tags, so a `branch = "main"` consumer never receives them and a
+`tag = "vX"` consumer receives exactly one release's set.
+
+Caveats:
+
+- **Pin by `tag`, not `rev`.** Cargo can fall back to a full fetch when a bare rev
+  is not already present locally.
+- `main` alone can no longer build `--features static`. Keep an environment escape
+  hatch (`SLANG_STATIC_ARCHIVE_DIR`, pointing at an unpacked or packed archive) so
+  `main` stays developable and CI can exercise the static path and regenerate
+  bindings without cutting a release.
+- A human `git clone` still pulls all tags; `--single-branch --no-tags` for a small
+  working clone.
+- Server-side repository size still grows per release. Only per-consumer transfer
+  is bounded.
+- **Verify empirically before committing to this.** Once the first release exists,
+  pin the renderer at `branch = "main"` and measure `~/.cargo/git/db/`.
 
 ## Plan
 
@@ -59,10 +124,11 @@ fn push_strings(mut self, name: CompilerOptionName, s0: *const i8, s1: *const i8
 ```
 
 On aarch64, `CStr::as_ptr()` yields `*const u8`, so these signatures fail to
-compile for callers. This is not hypothetical for us: `vulkan-slang-renderer`
-calls `.search_paths(&[search_path.as_ptr()])` at `src/shaders.rs:70`, `:151` and
-`:227`. Any arm64 target — a macOS archive, or aarch64 Linux — breaks at the
-renderer, not just here.
+compile for callers. Not hypothetical, and not optional: the release workflow ships
+a `macos-aarch64` archive, and `vulkan-slang-renderer` calls
+`.search_paths(&[search_path.as_ptr()])` at `src/shaders.rs:70`, `:151` and `:227`.
+Without this fix the macOS archive is unusable — and the failure lands in the
+renderer, not here.
 
 Switch both to `c_char`, matching upstream
 [#37](https://github.com/FloatyMonkey/slang-rs/pull/37). On x86_64 `c_char` is
@@ -73,45 +139,48 @@ and unblocks arm64 testing of everything that follows.
 
 ### 2. Vendor the archives
 
-Add `slang-sys/vendor/` holding one xz-compressed archive per target triple, named
-predictably, e.g.:
+Add `slang-sys/vendor/` on release branches only, holding one archive per platform:
 
-    vendor/slang-static-x86_64-unknown-linux-gnu.tar.xz
-    vendor/slang-static-x86_64-pc-windows-msvc.tar.xz
-    vendor/slang-static-aarch64-apple-darwin.tar.xz
+    vendor/slang-static-<version>-linux-x86_64.tar.gz
+    vendor/slang-static-<version>-macos-aarch64.tar.gz
+    vendor/slang-static-<version>-windows-x86_64.tar.gz
 
-Each expands to the layout `release-static.yml` already produces: `lib/`,
-`include/`, `licenses/`.
+Vendor the `.tar.gz` exactly as published, so each blob's SHA-256 can be checked
+against the GitHub release asset. Recompressing to xz would save space but breaks
+that provenance check; revisit only if size forces it.
 
-Record the source release tag and each archive's SHA-256 in a committed manifest
-so `build.rs` can verify what it extracted and so provenance is auditable. Plain
-git blobs only — Cargo git dependencies do not resolve LFS pointers.
+Record the source release tag and each SHA-256 in a committed manifest. Plain git
+blobs only — Cargo git dependencies do not resolve LFS pointers.
 
 ### 3. Rewrite the `static` path in `build.rs`
 
 Replace the `SLANG_EXTERNAL_DIR` branch with:
 
-1. Select the archive for `CARGO_CFG_TARGET_*`; fail with a clear message naming
-   the unsupported triple.
+1. Map `CARGO_CFG_TARGET_*` to a workflow platform name via the table above; fail
+   with a clear message naming any unsupported triple.
 2. Extract to `OUT_DIR` if not already present, verifying the manifest hash.
+   Honour `SLANG_STATIC_ARCHIVE_DIR` as an override first.
 3. Emit one `rustc-link-search=native={OUT_DIR}/.../lib`.
-4. Keep the existing six `rustc-link-lib=static=` lines unchanged:
-   `slang-compiler`, `compiler-core`, `core`, `miniz`, `lz4`, `cmark-gfm`.
-5. Point the bindgen header at the extracted `include/`, so a static build needs
+4. Emit **one** `rustc-link-lib=static=slang-static`. Delete the six existing
+   `slang-compiler` / `compiler-core` / `core` / `miniz` / `lz4` / `cmark-gfm`
+   lines — those components are already merged into the bundled archive, and
+   nothing else is shipped for them to resolve against.
+5. Emit the system libraries the workflow's consumer check proves are needed:
+   `m`, `pthread`, `dl` on Linux; `m`, `pthread` on macOS. `link-cplusplus`
+   continues to supply the C++ runtime.
+6. Point the bindgen header at the extracted `include/`, so a static build needs
    no `SLANG_DIR` / `SLANG_INCLUDE_DIR` / `VULKAN_SDK` at all.
 
-Net effect: four search paths collapse to one, all `Release/` guesswork
-disappears, and the static build stops depending on any environment variable.
-
-The dynamic path keeps its current environment-variable behaviour untouched.
+Net effect: four search paths become one, six link libraries become one, all
+`Release/` guesswork disappears, and the static build stops depending on any
+environment variable. The dynamic path keeps its current behaviour untouched.
 
 ### 4. Add `-DSLANG_STATIC` to the bindgen clang args
 
-The archives are compiled with `SLANG_STATIC`; the headers must be parsed the same
-way, or `SLANG_API` resolves to `__declspec(dllimport)` on MSVC while the library
-exports plain symbols. Verify empirically on Windows whether this manifests as a
-link failure — bindgen's handling of `dllimport` makes the failure mode
-non-obvious — but set it regardless for correctness.
+The archives are compiled with `SLANG_STATIC` and the workflow's own consumer link
+check passes `-DSLANG_STATIC`; the headers must be parsed the same way here, or
+`SLANG_API` resolves to `__declspec(dllimport)` on MSVC while the library exports
+plain symbols.
 
 ### 5. Make `static` additive; add `links = "slang"`
 
@@ -126,7 +195,8 @@ a comprehensible Cargo error rather than duplicate symbols at link time.
 ### 6. Check in generated bindings, regenerate under CI
 
 Commit `slang-sys/src/bindings.rs` and put bindgen behind an opt-in feature, with a
-CI job that regenerates from the vendored headers and fails on diff.
+CI job that regenerates from the archive's headers (via `SLANG_STATIC_ARCHIVE_DIR`
+on `main`) and fails on diff.
 
 Upstream [#35](https://github.com/FloatyMonkey/slang-rs/pull/35) is stalled on three
 maintainer objections. Vendoring answers the substantive one: version skew between
@@ -141,20 +211,20 @@ Payoff: the default build stops needing bindgen, libclang and a Slang header tre
 
 ### 7. Update the README
 
-Document the vendored-archive model, drop `SLANG_EXTERNAL_DIR`, and state which
-target triples ship an archive.
+Document the vendored-archive model and the tag-pinning requirement, drop
+`SLANG_EXTERNAL_DIR`, and state which target triples ship an archive.
 
 ## Renderer follow-on
 
-Bump the `shader-slang` rev off `40be816`, then `cargo check --all-targets`,
-`just shaders`, `just test`, and `timeout 3 just dev EXAMPLE` for validation
-errors. The MSVC runtime is already compatible: the archives are built with
-`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL`, which matches Rust's
-`*-pc-windows-msvc` default, so no consumer needs `+crt-static`.
+Switch the `shader-slang` dependency from `branch = "main"` to `tag = "..."`, then
+`cargo check --all-targets`, `just shaders`, `just test`, and
+`timeout 3 just dev EXAMPLE` for validation errors. No `+crt-static` is needed: the
+archives use `MultiThreadedDLL`, matching Rust's `*-pc-windows-msvc` default.
 
 Constraint: `import slang.neural` and `import experimental.workgraph` will not
-resolve, because the `.slang-module` files are deliberately not shipped in the
-archives. Grep `shaders/source/` before switching.
+resolve — the workflow drops those `.slang-module` files deliberately, since they
+are loaded from disk relative to the host binary and a static link cannot absorb
+them. Grep `shaders/source/` before switching.
 
 ## Prerequisites
 
@@ -165,33 +235,18 @@ Both must be resolved before step 2, since they determine what we vendor:
   job so far because the PR is a draft.
 - **The Windows archive size anomaly must be understood.** 141 MB versus 44 MB on
   Linux suggests debug records are still embedded per-object despite
-  `SLANG_ENABLE_RELEASE_DEBUG_INFO=OFF`. This is a blocker for vendoring
-  specifically, because it lands in git history permanently.
-
-## Open questions
-
-- Does `lib/` in the produced archives actually contain all six libraries we link?
-  If the CMake install stage exported only a subset, that is a packaging fix in
-  `Giesch/slang` before any of this works.
-- Which target triples do we ship? Linux x86_64 is required. macOS is presumably
-  arm64, which makes step 1 a hard prerequisite rather than a nicety.
-- Slang `dlopen`s `slang-glslang` at runtime
-  ([shader-slang/slang#10652](https://github.com/shader-slang/slang/issues/10652)),
-  so "static" is not absolute. The renderer compiles `.slang` to SPIR-V and never
-  takes the GLSL passthrough path, so this should be latent — but confirm what the
-  build did with `SLANG_ENABLE_SLANG_GLSLANG` before describing the result as fully
-  static anywhere user-facing.
+  `SLANG_ENABLE_RELEASE_DEBUG_INFO=OFF`. A blocker for vendoring specifically,
+  because it lands in git history permanently.
 
 ## Risks
 
-**Repository growth.** xz archives are already-compressed blobs, so git cannot
-delta them; every Slang version bump adds the full set to history permanently, and
-shallow clones do not help since Cargo fetches the tip. Sizing depends on the
-Windows anomaly above — an earlier ~13 MB-per-archive estimate predates the 141 MB
-Windows measurement and should be re-derived, not trusted. Escape hatches if it
-becomes painful: an orphan branch holding only archives, or a periodic history
-squash. Recommend accepting the cost now and re-evaluating at the third version
-bump.
+**Repository growth.** `.tar.gz` archives are already-compressed blobs, so git
+cannot delta them; every Slang version bump adds the full set permanently. The
+release-branch scheme bounds *per-consumer* transfer to one release's worth, but
+not the repository's own size. An earlier ~13 MB-per-archive estimate predates the
+141 MB Windows measurement and should be re-derived, not trusted. Escape hatch if
+it becomes painful: periodic history squash of old release branches.
 
-**Per-consumer clone cost.** Every consumer pays for all platforms. Acceptable
-while `vulkan-slang-renderer` is the only consumer; revisit if that changes.
+**Release ritual.** Cutting a release is now a branch-plus-tag operation rather
+than a push to `main`, and fixes wanted in a release have to be cherry-picked onto
+a fresh release branch. Acceptable for a repository that changes this rarely.
