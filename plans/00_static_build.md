@@ -212,7 +212,66 @@ apply once they are committed and regeneration is opt-in.
 
 Payoff: the default build stops needing bindgen, libclang and a Slang header tree.
 
-### 7. Update the README
+### 7. CI across all three platforms
+
+The crate's static path is platform-specific in ways nothing else in this plan
+tests: archive selection, extraction, link flags, and bindgen's target-dependent
+output. It needs its own matrix, mirroring the platforms `release-static.yml`
+ships:
+
+| runner | target triple |
+| --- | --- |
+| `ubuntu-22.04` | `x86_64-unknown-linux-gnu` |
+| `macos-latest` | `aarch64-apple-darwin` |
+| `windows-latest` | `x86_64-pc-windows-msvc` |
+
+Three jobs per platform:
+
+1. **Build and test the static feature** — `cargo test --no-default-features
+   --features static`. On `main` this uses `SLANG_STATIC_ARCHIVE_DIR`, pointed at
+   an archive downloaded from the pinned `Giesch/slang` release. On release
+   branches it must run against the *vendored* archive with no download, since
+   that is the configuration consumers actually get.
+
+2. **Bindings diff check** — regenerate with bindgen from the archive's headers
+   and fail on any diff. **Run this on all three platforms, not just Linux.**
+   bindgen output is target-dependent: `long` is 32-bit on MSVC and 64-bit
+   elsewhere, MSVC struct layout differs, and `c_char` signedness differs on
+   aarch64. A single committed `bindings.rs` may therefore not be valid
+   everywhere. This job is what tells us whether one file suffices or whether
+   step 6 needs `#[cfg]`-selected per-target bindings — decide from its result
+   rather than assuming, since assuming is what makes the rustified-enum hazard
+   in upstream #35 real rather than theoretical.
+
+3. **Consumer smoke test** — an example that creates a global session and
+   compiles a shader to SPIR-V at `-O3` through the Rust API. The slang
+   workflow's own consumer check proves the archive links from C++; this proves
+   it links and *runs* from Rust. `-O0` is not sufficient: it emits SPIR-V
+   natively and never reaches the embedded glslang wrapper.
+
+Platform notes:
+
+- **Windows** is where `-DSLANG_STATIC` (step 4) fails if it is missing, and the
+  job must *not* set `+crt-static` — the archive is built with `MultiThreadedDLL`
+  to match Rust's default, and forcing the static CRT reintroduces the LNK2038
+  the slang-side build was configured to avoid.
+- **macOS** runners are arm64, so this job does not compile at all without the
+  `c_char` fix from step 1. Set `MACOSX_DEPLOYMENT_TARGET=13.0` to match the
+  archive.
+- **Linux** needs a runner with glibc ≥ 2.28, the floor set by building in
+  `manylinux_2_28`. `ubuntu-22.04` satisfies this.
+
+Extraction in `build.rs` must be done with Rust crates (`flate2`, `tar`, `sha2`)
+rather than by shelling out to `tar`, whose availability and flag handling differ
+on Windows runners. That adds build-dependencies, which is a real cost — but a
+smaller one than bindgen and libclang, which step 6 removes.
+
+**Gate the release on this matrix.** A release branch must be green on all three
+platforms before its tag is pushed. The slang-side workflow already proves the
+archive is good; this proves the crate consuming it is good, and it is the last
+check before consumers pin the tag.
+
+### 8. Update the README
 
 Document the vendored-archive model and the tag-pinning requirement, drop
 `SLANG_EXTERNAL_DIR`, and state which target triples ship an archive.
@@ -248,20 +307,54 @@ Both must be resolved before step 2, since they determine what we vendor:
   `v2026.13.1-static-draft` publishes as draft + prerelease, which exercises the
   never-yet-run publish path without committing to a public release.
 
-- **The Windows archive size anomaly must be understood.** 141 MB versus 44 MB on
-  Linux suggests debug records are still embedded per-object despite
+- **The Windows archive size anomaly must be understood.** Measured from the
+  `v2026.13.1-static-draft` run (30661852424). Each run artifact holds both the
+  `.tar.gz` and the `.zip` of the same tree, so the per-archive figure is roughly
+  half:
+
+  | platform | artifact | ≈ per archive |
+  | --- | --- | --- |
+  | macos-aarch64 | 38.7 MB | ~19 MB |
+  | linux-x86_64 | 44.4 MB | ~22 MB |
+  | windows-x86_64 | 141.0 MB | ~70 MB |
+
+  Linux at ~22 MB reconciles with PR #3's measured 21.6 MB at `gzip -9`, so the
+  Linux and macOS numbers are as expected and Windows is the outlier — roughly
+  3× either, which points at debug records still embedded per-object despite
   `SLANG_ENABLE_RELEASE_DEBUG_INFO=OFF`. A blocker for vendoring specifically,
-  because it lands in git history permanently. Reconcile against PR #3's measured
-  Linux baseline while investigating: 76.6 MB stripped, 21.6 MB at `gzip -9`.
+  because it lands in git history permanently.
+
+Verified from the same run, and no longer open:
+
+- The publish path works. All 15 steps succeeded on all three platforms, `Publish
+  to release` executed for the first time, and both assets per platform landed on
+  a draft + prerelease release.
+- The Linux consumer link check passed against the packaged tree alone —
+  `-I<base>/include`, `<base>/lib/libslang-static.a`, `-lstdc++ -lm -lpthread
+  -ldl` — and the resulting binary ran. That confirms the single bundled archive
+  is linkable standalone, which is what step 3 depends on.
+
+One defect worth fixing on the slang side before the real tag: all three jobs
+race to create the release, since each runs `Publish to release` independently.
+The draft run logged `Using release 363305783 ... instead of duplicate draft
+363307334` and cleaned up after itself, but that recovery is timing-dependent.
+A separate publish job with `needs: build` would make it deterministic.
 
 ## Risks
 
 **Repository growth.** `.tar.gz` archives are already-compressed blobs, so git
-cannot delta them; every Slang version bump adds the full set permanently. The
-release-branch scheme bounds *per-consumer* transfer to one release's worth, but
-not the repository's own size. An earlier ~13 MB-per-archive estimate predates the
-141 MB Windows measurement and should be re-derived, not trusted. Escape hatch if
-it becomes painful: periodic history squash of old release branches.
+cannot delta them; every Slang version bump adds the full set permanently. Now
+measured rather than estimated: ~22 + ~19 + ~70 MB is **~111 MB per release**,
+close to three times the ~40 MB this plan originally assumed. The release-branch
+scheme bounds *per-consumer* transfer to one release's worth, so a tag-pinned
+consumer still fetches only its own platform set — but the repository itself
+grows by 111 MB per bump.
+
+That makes the Windows investigation load-bearing rather than tidy-up: at ~70 MB
+it is nearly two thirds of each release. If it cannot be reduced, reconsider
+recompressing to xz (≈40% saving, at the cost of the provenance check in step 2)
+before accepting the cost. Escape hatch if it still becomes painful: periodic
+history squash of old release branches.
 
 **Release ritual.** Cutting a release is now a branch-plus-tag operation rather
 than a push to `main`, and fixes wanted in a release have to be cherry-picked onto
