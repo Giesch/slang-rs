@@ -82,8 +82,8 @@ The workflow's own consumer link check also pins down what a consumer must pass:
 
 ## Where the archives live
 
-Keeping ~40 MB of already-compressed blobs out of `main` while still shipping them
-through a plain Cargo git dependency:
+Keeping 114.7 MB of already-compressed blobs per release out of `main` while still
+shipping them through a plain Cargo git dependency:
 
 - `main` holds source only, no archives, ever.
 - Each release branches `release/vX` from a `main` commit, adds
@@ -139,21 +139,23 @@ and unblocks arm64 testing of everything that follows.
 
 ### 2. Vendor the archives
 
-Add `slang-sys/vendor/` on release branches only, holding one archive per platform:
+Add `slang-sys/vendor/` on release branches only, holding one archive per platform.
+For the current release that is:
 
-    vendor/slang-static-<version>-linux-x86_64.tar.gz
-    vendor/slang-static-<version>-macos-aarch64.tar.gz
-    vendor/slang-static-<version>-windows-x86_64.tar.gz
+    vendor/slang-static-2026.13.1-linux-x86_64.tar.gz
+    vendor/slang-static-2026.13.1-macos-aarch64.tar.gz
+    vendor/slang-static-2026.13.1-windows-x86_64.tar.gz
 
-Vendor the `.tar.gz` exactly as published, so each blob's SHA-256 can be checked
-against the GitHub release asset. Recompressing to xz would save roughly 40% —
-PR #3 measured the Linux archive at 21.6 MB with `gzip -9` against 13.4 MB with
-`xz -9`, and the workflow packages at gzip's default level, so the real gap is
-wider — but it breaks that provenance check. Start with the published `.tar.gz`;
-revisit if the Windows size investigation leaves us needing the space.
+Vendor the archives **exactly as published**, so each blob's SHA-256 can be
+checked against the release asset — the hashes are recorded above, and the
+published `SHA256SUMS` already matches GitHub's own asset digests. Never
+recompress locally: it saves space but destroys that check, which is the whole
+reason the manifest is worth having. If the space is needed, get it by having
+`Giesch/slang` publish a `.tar.xz` as a fourth asset and vendoring that instead.
 
-Record the source release tag and each SHA-256 in a committed manifest. Plain git
-blobs only — Cargo git dependencies do not resolve LFS pointers.
+Record the source release tag (`v2026.13.1-static`) and each SHA-256 in a
+committed manifest. Plain git blobs only — Cargo git dependencies do not resolve
+LFS pointers.
 
 ### 3. Rewrite the `static` path in `build.rs`
 
@@ -288,73 +290,76 @@ resolve — the workflow drops those `.slang-module` files deliberately, since t
 are loaded from disk relative to the host binary and a static link cannot absorb
 them. Grep `shaders/source/` before switching.
 
-## Prerequisites
+## Upstream release — available
 
-Both must be resolved before step 2, since they determine what we vendor:
+**`Giesch/slang` `v2026.13.1-static` is published** (release 363909842,
+2026-08-02), non-draft, seven assets. This clears the first prerequisite; step 2
+can proceed.
 
-- **A static release must be tagged in `Giesch/slang`.**
-  [PR #3](https://github.com/Giesch/slang/pull/3) merged to `master` on
-  2026-07-31, so `release-static.yml` is now live there and a matching tag push
-  will fire it. Nothing has been published yet — the four existing releases
-  (`v2026.13.1`, `v2026.13`, `v2026.1.1`, `v2026.1-static`) all predate the merge,
-  and the publish step has been skipped on every run so far.
+Verified directly against the published Linux archive:
 
-  Tag naming needs care. The workflow derives archive names from
-  `${GITHUB_REF_NAME#v}`, and the upstream-inherited `v2026.13` / `v2026.13.1`
-  tags already exist, so the static release needs a distinct one. Follow the
-  repository's own prior art and suffix it: `v2026.13.1-static` matches the
-  trigger pattern and mirrors the existing `v2026.1-static`. A first pass tagged
-  `v2026.13.1-static-draft` publishes as draft + prerelease, which exercises the
-  never-yet-run publish path without committing to a public release.
+- `SHA256SUMS` is published and matches GitHub's own asset digests on all six
+  archives. The Linux `.tar.gz` was downloaded and checksummed: **OK**.
+- `lib/` contains **exactly one file** — `libslang-static.a`, 79,440,832 bytes.
+  No `libslang-compiler.a`. This is the invariant step 3 depends on, now
+  confirmed from the shipped artifact rather than inferred from the workflow.
+- `include/` holds 16 headers; `licenses/` holds 19 entries including the
+  `slang-LICENSES/` subtree.
+- The consumer link check passed on all three platforms against the packaged
+  tree alone — `-I<base>/include`, the one archive, and `-lstdc++ -lm -lpthread
+  -ldl` on Linux — and the resulting binary ran.
 
-- **The Windows archive size anomaly must be understood.** Measured from the
-  `v2026.13.1-static-draft` run (30661852424). Each run artifact holds both the
-  `.tar.gz` and the `.zip` of the same tree, so the per-archive figure is roughly
-  half:
+Published asset sizes, exact:
 
-  | platform | artifact | ≈ per archive |
-  | --- | --- | --- |
-  | macos-aarch64 | 38.7 MB | ~19 MB |
-  | linux-x86_64 | 44.4 MB | ~22 MB |
-  | windows-x86_64 | 141.0 MB | ~70 MB |
+| platform | `.tar.gz` | `.zip` |
+| --- | --- | --- |
+| macos-aarch64 | 19,847,626 (19.8 MB) | 19,280,331 (19.3 MB) |
+| linux-x86_64 | 22,819,764 (22.8 MB) | 22,067,549 (22.1 MB) |
+| windows-x86_64 | 72,028,693 (72.0 MB) | 70,665,271 (70.7 MB) |
 
-  Linux at ~22 MB reconciles with PR #3's measured 21.6 MB at `gzip -9`, so the
-  Linux and macOS numbers are as expected and Windows is the outlier — roughly
-  3× either, which points at debug records still embedded per-object despite
-  `SLANG_ENABLE_RELEASE_DEBUG_INFO=OFF`. A blocker for vendoring specifically,
-  because it lands in git history permanently.
+SHA-256 of the three `.tar.gz` archives, for the step 2 manifest:
 
-Verified from the same run, and no longer open:
+```
+4aa095759262d1e475ab3b9f04dc97bd709219a1560ebc093874551e8ad9f73f  slang-static-2026.13.1-linux-x86_64.tar.gz
+4e5d556e54124cb6077060c0e0978c8518ff5e447384de9904853676c1352e4e  slang-static-2026.13.1-macos-aarch64.tar.gz
+ac8b98ac608b3d752c8e21dce431fa24c701c713ca5d5b1be2858a8280a3868a  slang-static-2026.13.1-windows-x86_64.tar.gz
+```
 
-- The publish path works. All 15 steps succeeded on all three platforms, `Publish
-  to release` executed for the first time, and both assets per platform landed on
-  a draft + prerelease release.
-- The Linux consumer link check passed against the packaged tree alone —
-  `-I<base>/include`, `<base>/lib/libslang-static.a`, `-lstdc++ -lm -lpthread
-  -ldl` — and the resulting binary ran. That confirms the single bundled archive
-  is linkable standalone, which is what step 3 depends on.
+## Remaining prerequisite
 
-One defect worth fixing on the slang side before the real tag: all three jobs
-race to create the release, since each runs `Publish to release` independently.
-The draft run logged `Using release 363305783 ... instead of duplicate draft
-363307334` and cleaned up after itself, but that recovery is timing-dependent.
-A separate publish job with `needs: build` would make it deterministic.
+**The Windows archive size still needs resolving before step 2.** At 72.0 MB it
+is 63% of the 114.7 MB a full vendored set costs, against 22.8 MB Linux and
+19.8 MB macOS for the same content — roughly 3× either. That points at debug
+records still embedded per-object despite `SLANG_ENABLE_RELEASE_DEBUG_INFO=OFF`,
+but the cause is not yet diagnosed. It matters here and nowhere else, because
+this is the number that lands in git history permanently.
+
+**Ask `Giesch/slang` to publish `.tar.xz` alongside the existing formats.** The
+published `.zip` is smaller than the `.tar.gz` on every platform (70.7 vs 72.0,
+22.1 vs 22.8, 19.3 vs 19.8), which means the tarball is being written at `tar
+-czf`'s default gzip level rather than `-9`. PR #3 measured the Linux archive at
+21.6 MB with `gzip -9` against 13.4 MB with `xz -9` — so a published `.tar.xz`
+could roughly halve the vendored total while *keeping* the provenance check,
+since it would ship as a checksummed release asset like everything else. That is
+strictly better than recompressing locally, which is the option this plan
+previously contemplated and which would break the SHA-256-against-release check
+in step 2.
 
 ## Risks
 
 **Repository growth.** `.tar.gz` archives are already-compressed blobs, so git
-cannot delta them; every Slang version bump adds the full set permanently. Now
-measured rather than estimated: ~22 + ~19 + ~70 MB is **~111 MB per release**,
-close to three times the ~40 MB this plan originally assumed. The release-branch
-scheme bounds *per-consumer* transfer to one release's worth, so a tag-pinned
-consumer still fetches only its own platform set — but the repository itself
-grows by 111 MB per bump.
+cannot delta them; every Slang version bump adds the full set permanently. Exact,
+from the published `v2026.13.1-static` assets: 22,819,764 + 19,847,626 +
+72,028,693 = **114.7 MB per release**, close to three times the ~40 MB this plan
+originally assumed. The release-branch scheme bounds *per-consumer* transfer to
+one release's worth, so a tag-pinned consumer still fetches only its own platform
+set — but the repository itself grows by 114.7 MB per bump.
 
-That makes the Windows investigation load-bearing rather than tidy-up: at ~70 MB
-it is nearly two thirds of each release. If it cannot be reduced, reconsider
-recompressing to xz (≈40% saving, at the cost of the provenance check in step 2)
-before accepting the cost. Escape hatch if it still becomes painful: periodic
-history squash of old release branches.
+That makes the Windows question load-bearing rather than tidy-up: at 72.0 MB it is
+63% of each release. The right lever is a published `.tar.xz` (see "Remaining
+prerequisite"), which keeps the provenance check intact; local recompression does
+not. Escape hatch if it still becomes painful: periodic history squash of old
+release branches.
 
 **Release ritual.** Cutting a release is now a branch-plus-tag operation rather
 than a push to `main`, and fixes wanted in a release have to be cherry-picked onto
