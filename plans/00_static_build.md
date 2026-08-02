@@ -23,6 +23,14 @@ both of which upstream is still litigating.
 offline, network-free builds. To keep the blobs out of `main`'s history they live
 only on release branches — see "Where the archives live" below.
 
+**We vendor `.tar.xz`, not `.tar.gz`.** These blobs are committed permanently, so
+compression ratio is the one cost that never goes away. `Giesch/slang` must
+therefore publish a `.tar.xz` per platform as a release asset, alongside the
+existing `.tar.gz` and `.zip` — that is a hard dependency of step 2, not a
+preference. Vendoring a locally recompressed archive is explicitly rejected: it
+would break the SHA-256-against-published-asset check that makes the manifest
+worth having.
+
 ## Where things stand
 
 The `static` feature today (`slang-sys/build.rs:44-70`) requires `SLANG_EXTERNAL_DIR`
@@ -65,7 +73,8 @@ Three platforms ship, named by the workflow's own labels rather than Rust triple
 | `windows-x86_64` | `x86_64-pc-windows-msvc` | `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL` |
 
 Packaged as `slang-static-<version>-<platform>.tar.gz` and `.zip`, each expanding
-to `lib/`, `include/`, `licenses/`.
+to `lib/`, `include/`, `licenses/`. A `.tar.xz` is to be added — see "Remaining
+prerequisite" — and is what we vendor.
 
 **`slang-glslang` is not dynamically loaded.** The build sets
 `SLANG_EMBED_SLANG_GLSLANG=ON` with `SLANG_ENABLE_SLANG_GLSLANG=OFF`, and a
@@ -82,8 +91,9 @@ The workflow's own consumer link check also pins down what a consumer must pass:
 
 ## Where the archives live
 
-Keeping 114.7 MB of already-compressed blobs per release out of `main` while still
-shipping them through a plain Cargo git dependency:
+Keeping a per-release set of compressed blobs — 114.7 MB as `.tar.gz` today,
+projected ~71 MB as `.tar.xz` — out of `main` while still shipping them through a
+plain Cargo git dependency:
 
 - `main` holds source only, no archives, ever.
 - Each release branches `release/vX` from a `main` commit, adds
@@ -142,20 +152,30 @@ and unblocks arm64 testing of everything that follows.
 Add `slang-sys/vendor/` on release branches only, holding one archive per platform.
 For the current release that is:
 
-    vendor/slang-static-2026.13.1-linux-x86_64.tar.gz
-    vendor/slang-static-2026.13.1-macos-aarch64.tar.gz
-    vendor/slang-static-2026.13.1-windows-x86_64.tar.gz
+    vendor/slang-static-2026.13.1-linux-x86_64.tar.xz
+    vendor/slang-static-2026.13.1-macos-aarch64.tar.xz
+    vendor/slang-static-2026.13.1-windows-x86_64.tar.xz
+
+**Blocked until `Giesch/slang` publishes `.tar.xz` assets** — see "Remaining
+prerequisite". The `.tar.gz` currently published would work mechanically, but
+these blobs are permanent, and re-vendoring later to save ~44 MB would mean
+another full set in history rather than a replacement of the old one. Wait for
+the format.
 
 Vendor the archives **exactly as published**, so each blob's SHA-256 can be
-checked against the release asset — the hashes are recorded above, and the
-published `SHA256SUMS` already matches GitHub's own asset digests. Never
-recompress locally: it saves space but destroys that check, which is the whole
-reason the manifest is worth having. If the space is needed, get it by having
-`Giesch/slang` publish a `.tar.xz` as a fourth asset and vendoring that instead.
+checked against the release asset — the published `SHA256SUMS` already matches
+GitHub's own asset digests, and will cover the `.tar.xz` too once the publish
+job's `dist/*` glob picks it up. Never recompress locally: it saves the same
+space but destroys that check, which is the whole reason the manifest is worth
+having.
 
 Record the source release tag (`v2026.13.1-static`) and each SHA-256 in a
 committed manifest. Plain git blobs only — Cargo git dependencies do not resolve
 LFS pointers.
+
+`build.rs` will need an xz decoder — `xz2` or `liblzma`, in place of `flate2`
+(see step 7's note on doing extraction in Rust rather than shelling out to
+`tar`).
 
 ### 3. Rewrite the `static` path in `build.rs`
 
@@ -263,7 +283,7 @@ Platform notes:
 - **Linux** needs a runner with glibc ≥ 2.28, the floor set by building in
   `manylinux_2_28`. `ubuntu-22.04` satisfies this.
 
-Extraction in `build.rs` must be done with Rust crates (`flate2`, `tar`, `sha2`)
+Extraction in `build.rs` must be done with Rust crates (`xz2`, `tar`, `sha2`)
 rather than by shelling out to `tar`, whose availability and flag handling differ
 on Windows runners. That adds build-dependencies, which is a real cost — but a
 smaller one than bindgen and libclang, which step 6 removes.
@@ -327,27 +347,49 @@ ac8b98ac608b3d752c8e21dce431fa24c701c713ca5d5b1be2858a8280a3868a  slang-static-2
 
 ## Remaining prerequisite
 
-**The Windows archive size still needs resolving before step 2.** At 72.0 MB it
-is 63% of the 114.7 MB a full vendored set costs, against 22.8 MB Linux and
-19.8 MB macOS for the same content — roughly 3× either. That points at debug
-records still embedded per-object despite `SLANG_ENABLE_RELEASE_DEBUG_INFO=OFF`,
-but the cause is not yet diagnosed. It matters here and nowhere else, because
-this is the number that lands in git history permanently.
+**`Giesch/slang` must publish `.tar.xz` release assets.** This is the one thing
+blocking step 2. Concretely, in `release-static.yml`'s `Package` step:
 
-**Ask `Giesch/slang` to publish `.tar.xz` alongside the existing formats.** The
-published `.zip` is smaller than the `.tar.gz` on every platform (70.7 vs 72.0,
-22.1 vs 22.8, 19.3 vs 19.8), which means the tarball is being written at `tar
--czf`'s default gzip level rather than `-9`. PR #3 measured the Linux archive at
-21.6 MB with `gzip -9` against 13.4 MB with `xz -9` — so a published `.tar.xz`
-could roughly halve the vendored total while *keeping* the provenance check,
-since it would ship as a checksummed release asset like everything else. That is
-strictly better than recompressing locally, which is the option this plan
-previously contemplated and which would break the SHA-256-against-release check
-in step 2.
+```bash
+tar -cJf "${BASE}.tar.xz" "$BASE"
+```
+
+added alongside the existing `tar -czf` and `zip`, with the new file included in
+the `upload-artifact` paths and picked up by the publish job's `dist/*` glob so
+it lands in `SHA256SUMS` like everything else. Re-tagging is not required to
+prove it out — the `pull_request` trigger already covers
+`.github/workflows/release-static.yml`, so the sizes show up on the PR.
+
+Why xz specifically: the published `.zip` is smaller than the `.tar.gz` on every
+platform (70.7 vs 72.0, 22.1 vs 22.8, 19.3 vs 19.8), so the tarball is being
+written at `tar -czf`'s default gzip level rather than `-9`. PR #3 measured the
+Linux archive at 21.6 MB with `gzip -9` against 13.4 MB with `xz -9` — a 0.62
+ratio.
+
+Applying that ratio to the published sizes gives a **projection, not a
+measurement**:
+
+| platform | published `.tar.gz` | projected `.tar.xz` |
+| --- | --- | --- |
+| macos-aarch64 | 19.8 MB | ~12 MB |
+| linux-x86_64 | 22.8 MB | ~14 MB |
+| windows-x86_64 | 72.0 MB | ~45 MB |
+| **total** | **114.7 MB** | **~71 MB** |
+
+Treat those as a lower bound on the benefit rather than a firm number. Windows
+may do better than the ratio suggests: if its bulk really is debug records, that
+is highly compressible data and xz should exploit it more than gzip does. The
+real figures arrive with the PR that adds the format — decide from those.
+
+**Secondary, no longer blocking: diagnose the Windows size.** At 72.0 MB against
+22.8 Linux and 19.8 macOS for the same content, roughly 3× either, something is
+still being embedded despite `SLANG_ENABLE_RELEASE_DEBUG_INFO=OFF`. Worth fixing
+at the source, but xz is the cheaper lever and it lands first. If the `.tar.xz`
+numbers come back acceptable, this can stay a background task.
 
 ## Risks
 
-**Repository growth.** `.tar.gz` archives are already-compressed blobs, so git
+**Repository growth.** Compressed archives are opaque blobs, so git
 cannot delta them; every Slang version bump adds the full set permanently. Exact,
 from the published `v2026.13.1-static` assets: 22,819,764 + 19,847,626 +
 72,028,693 = **114.7 MB per release**, close to three times the ~40 MB this plan
