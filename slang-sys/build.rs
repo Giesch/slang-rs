@@ -1,5 +1,3 @@
-extern crate bindgen;
-
 use std::env;
 use std::path::PathBuf;
 
@@ -8,7 +6,7 @@ fn main() {
 	// dependent enabling default features can cause that), static wins.
 	let static_lib = cfg!(feature = "static");
 
-	let include_dir = if static_lib {
+	let vendored = if static_lib {
 		let tree = vendored_tree();
 		println!("cargo:rerun-if-changed={}", tree.display());
 
@@ -32,22 +30,11 @@ fn main() {
 			_ => {}
 		}
 
-		tree.join("include").display().to_string()
+		Some(tree)
 	} else {
 		println!("cargo:rerun-if-env-changed=SLANG_DIR");
-		println!("cargo:rerun-if-env-changed=SLANG_INCLUDE_DIR");
 		println!("cargo:rerun-if-env-changed=SLANG_LIB_DIR");
 		println!("cargo:rerun-if-env-changed=VULKAN_SDK");
-
-		let include_dir = if let Ok(dir) = env::var("SLANG_INCLUDE_DIR") {
-			dir
-		} else if let Ok(dir) = env::var("SLANG_DIR") {
-			format!("{dir}/include")
-		} else if let Ok(dir) = env::var("VULKAN_SDK") {
-			format!("{dir}/include/slang")
-		} else {
-			panic!("The environment variable SLANG_INCLUDE_DIR, SLANG_DIR, or VULKAN_SDK must be set");
-		};
 
 		let lib_dir = if let Ok(dir) = env::var("SLANG_LIB_DIR") {
 			dir
@@ -65,48 +52,13 @@ fn main() {
 
 		println!("cargo:rustc-link-lib=dylib=slang");
 
-		include_dir
+		None
 	};
 
-	let out_dir = env::var("OUT_DIR").expect("Couldn't determine output directory.");
-
-	let mut builder = bindgen::builder()
-		.header(format!("{include_dir}/slang.h").as_str())
-		.clang_arg("-v")
-		.clang_arg("-xc++")
-		.clang_arg("-std=c++17");
-
-	if static_lib {
-		// The libraries are compiled with SLANG_STATIC; without it SLANG_API
-		// resolves to __declspec(dllimport) on MSVC while the library exports
-		// plain symbols.
-		builder = builder.clang_arg("-DSLANG_STATIC");
-	}
-
-	builder
-		.allowlist_function("spReflection.*")
-		.allowlist_function("spComputeStringHash")
-		.allowlist_function("slang_.*")
-		.allowlist_type("slang.*")
-		.allowlist_var("SLANG_.*")
-		.with_codegen_config(
-			bindgen::CodegenConfig::FUNCTIONS
-				| bindgen::CodegenConfig::TYPES
-				| bindgen::CodegenConfig::VARS,
-		)
-		.parse_callbacks(Box::new(ParseCallback {}))
-		.default_enum_style(bindgen::EnumVariation::Rust {
-			non_exhaustive: false,
-		})
-		.constified_enum("SlangProfileID")
-		.constified_enum("SlangCapabilityID")
-		.vtable_generation(true)
-		.layout_tests(false)
-		.derive_copy(true)
-		.generate()
-		.expect("Couldn't generate bindings.")
-		.write_to_file(format!("{out_dir}/bindings.rs").as_str())
-		.expect("Couldn't write bindings.");
+	#[cfg(feature = "regenerate-bindings")]
+	regenerate_bindings(vendored.as_deref(), static_lib);
+	#[cfg(not(feature = "regenerate-bindings"))]
+	drop(vendored);
 }
 
 /// Locates the prebuilt static library tree for the current target:
@@ -143,9 +95,74 @@ fn vendored_tree() -> PathBuf {
 	);
 }
 
+/// Regenerates `src/bindings.rs` from the slang headers. Opt-in because the
+/// committed bindings are authoritative: headers and libraries ship together
+/// in the vendored release, so the two cannot skew.
+#[cfg(feature = "regenerate-bindings")]
+fn regenerate_bindings(vendored: Option<&std::path::Path>, static_lib: bool) {
+	let include_dir = match vendored {
+		Some(tree) => tree.join("include").display().to_string(),
+		None => {
+			println!("cargo:rerun-if-env-changed=SLANG_INCLUDE_DIR");
+			if let Ok(dir) = env::var("SLANG_INCLUDE_DIR") {
+				dir
+			} else if let Ok(dir) = env::var("SLANG_DIR") {
+				format!("{dir}/include")
+			} else if let Ok(dir) = env::var("VULKAN_SDK") {
+				format!("{dir}/include/slang")
+			} else {
+				panic!("The environment variable SLANG_INCLUDE_DIR, SLANG_DIR, or VULKAN_SDK must be set");
+			}
+		}
+	};
+
+	let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+	let bindings_path = manifest_dir.join("src").join("bindings.rs");
+
+	let mut builder = bindgen::builder()
+		.header(format!("{include_dir}/slang.h").as_str())
+		.clang_arg("-v")
+		.clang_arg("-xc++")
+		.clang_arg("-std=c++17");
+
+	if static_lib {
+		// The libraries are compiled with SLANG_STATIC; without it SLANG_API
+		// resolves to __declspec(dllimport) on MSVC while the library exports
+		// plain symbols.
+		builder = builder.clang_arg("-DSLANG_STATIC");
+	}
+
+	builder
+		.allowlist_function("spReflection.*")
+		.allowlist_function("spComputeStringHash")
+		.allowlist_function("slang_.*")
+		.allowlist_type("slang.*")
+		.allowlist_var("SLANG_.*")
+		.with_codegen_config(
+			bindgen::CodegenConfig::FUNCTIONS
+				| bindgen::CodegenConfig::TYPES
+				| bindgen::CodegenConfig::VARS,
+		)
+		.parse_callbacks(Box::new(ParseCallback {}))
+		.default_enum_style(bindgen::EnumVariation::Rust {
+			non_exhaustive: false,
+		})
+		.constified_enum("SlangProfileID")
+		.constified_enum("SlangCapabilityID")
+		.vtable_generation(true)
+		.layout_tests(false)
+		.derive_copy(true)
+		.generate()
+		.expect("Couldn't generate bindings.")
+		.write_to_file(&bindings_path)
+		.expect("Couldn't write bindings.");
+}
+
+#[cfg(feature = "regenerate-bindings")]
 #[derive(Debug)]
 struct ParseCallback {}
 
+#[cfg(feature = "regenerate-bindings")]
 impl bindgen::callbacks::ParseCallbacks for ParseCallback {
 	fn enum_variant_name(
 		&self,
@@ -167,10 +184,15 @@ impl bindgen::callbacks::ParseCallbacks for ParseCallback {
 		Some(new_variant_name.to_string())
 	}
 
-	#[cfg(feature = "serde")]
-	fn add_derives(&self, info: &bindgen::callbacks::DeriveInfo<'_>) -> Vec<String> {
+	// The committed bindings are feature-independent: serde derives are baked
+	// in behind cfg_attr rather than added only when regenerating with the
+	// serde feature enabled.
+	fn add_attributes(&self, info: &bindgen::callbacks::AttributeInfo<'_>) -> Vec<String> {
 		if info.name.starts_with("Slang") && info.kind == bindgen::callbacks::TypeKind::Enum {
-			return vec!["serde::Serialize".into(), "serde::Deserialize".into()];
+			return vec![
+				r#"#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]"#
+					.into(),
+			];
 		}
 		vec![]
 	}
@@ -178,6 +200,7 @@ impl bindgen::callbacks::ParseCallbacks for ParseCallback {
 
 /// Converts `snake_case` or `SNAKE_CASE` to `PascalCase`.
 /// If the input is already in `PascalCase` it will be returned as is.
+#[cfg(feature = "regenerate-bindings")]
 fn pascal_case_from_snake_case(snake_case: &str) -> String {
 	let mut result = String::new();
 

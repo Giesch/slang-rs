@@ -13,10 +13,13 @@ serde = { version = "1", features = ["derive"], optional = true }
 link-cplusplus = { version = "1", optional = true }
 
 [build-dependencies]
-bindgen = "0.72.0"
+# Pinned exactly: src/bindings.rs is committed and CI diffs regenerated output
+# against it, so a floating bindgen version would break the check.
+bindgen = { version = "=0.72.1", optional = true }
 
 [features]
 default = ["dynamic"]
 dynamic = []
 static = ["dep:link-cplusplus"]
 serde = ["dep:serde"]
+regenerate-bindings = ["dep:bindgen"]
