@@ -7,9 +7,8 @@ Scope: `Giesch/slang-rs` (this repo), with a follow-on bump in `Giesch/vulkan-sl
 
 Make `features = ["static"]` work without a local Slang source tree, on every
 platform we care about, by vendoring the prebuilt static libraries produced by
-`Giesch/slang`'s `release-static.yml` workflow — extracted from the published
-archives, committed only on release tags — and linking them directly from
-`build.rs`.
+`Giesch/slang`'s `release-static.yml` workflow — as the published `.tar.xz`
+archives, committed only on release tags — and expanding them from `build.rs`.
 
 ## Decisions taken
 
@@ -28,23 +27,25 @@ of `main`'s history entirely they exist only in release-tag commits — see
 fetch recipe materializes the same content into a gitignored directory, so
 development builds and CI work with nothing binary committed.
 
-**We vendor the extracted trees, not the archives.** An earlier revision of
-this plan committed the published `.tar.xz` verbatim, so every blob could be
-re-checked against the release's `SHA256SUMS` forever. The Windows finding
-supersedes that: the extracted `slang-static.lib` is 487.8 MB, so an
-archive-based `build.rs` would re-materialize ~488 MB into `OUT_DIR` for every
-consumer project and profile that builds the crate on Windows — and a shared
-extraction cache to avoid that would reintroduce exactly the
-writes-outside-`OUT_DIR` and cache-race problems recorded against upstream #35
-in step 6. Committing the extracted `lib/` + `include/` + `licenses/` trees
-instead means `build.rs` links the vendored file where it sits: no extraction
-step, no `xz2`/`tar`/`sha2` build-dependencies, and the uncompressed cost is
-paid once per cargo checkout rather than once per target directory. The
-SHA-256-against-published-asset check moves to fetch time: the justfile recipe
-verifies each downloaded `.tar.xz` against hashes pinned in this repo before
-extracting. The trade is repository growth per release — git zlib-compresses
-blobs into the pack, so a release costs roughly the `.tar.gz` total (~115 MB)
-rather than the `.tar.xz` total (62.3 MB). See "Risks".
+**We vendor the published `.tar.xz` archives, not extracted trees.** This
+decision flipped twice, and the second flip is forced. An intermediate
+revision committed the extracted `lib/` + `include/` + `licenses/` trees to
+avoid `build.rs` re-materializing ~488 MB into `OUT_DIR` per Windows project
+and profile — and died on first contact: GitHub hard-rejects any file over
+100 MB, and the extracted `slang-static.lib` is 465 MiB. LFS cannot rescue it
+because Cargo git dependencies do not resolve LFS pointers. The archives
+themselves are fine — 36.7 MB at worst, under even GitHub's 50 MB warning
+threshold — so the archives are what release tags carry, exactly as published.
+
+The consequences: `build.rs` regains an extraction step (pure-Rust `lzma-rs` +
+`tar` + `sha2` build-dependencies, compiled only for the `static` feature) and
+tag consumers pay the `OUT_DIR` expansion — once per profile, guarded by a
+marker file. Development builds on `main` are unaffected: `just fetch-static`
+extracts into `vendor-local/` and `build.rs` links those trees in place with
+no extraction. The SHA-256-against-published-asset check now runs twice: the
+justfile verifies downloads at fetch time, and `build.rs` verifies the
+vendored archive against the committed manifest before every extraction, so
+the provenance chain survives into consumer builds.
 
 ## Where things stand
 
@@ -90,7 +91,7 @@ Three platforms ship, named by the workflow's own labels rather than Rust triple
 Packaged as `slang-static-<version>-<platform>` in `.tar.gz`, `.tar.xz` and
 `.zip`, each expanding to `lib/`, `include/`, `licenses/`. The fetch recipe
 downloads the `.tar.xz` — smallest asset, and the pinned hashes below are for
-it — and what gets committed on a release tag is the extracted tree.
+it — and release tags commit those archives exactly as published.
 
 **`slang-glslang` is not dynamically loaded.** The build sets
 `SLANG_EMBED_SLANG_GLSLANG=ON` with `SLANG_ENABLE_SLANG_GLSLANG=OFF`, and a
@@ -107,8 +108,8 @@ The workflow's own consumer link check also pins down what a consumer must pass:
 
 ## Where the static libs live
 
-Keeping ~630 MB uncompressed (~115 MB as git packs it) of per-release binaries
-out of `main` while still shipping them through a plain Cargo git dependency:
+Keeping 62.3 MB of per-release archives out of `main` while still shipping
+them through a plain Cargo git dependency:
 
 - `main` holds source plus the `justfile`, no binaries, ever.
 - `just fetch-static` downloads the pinned release's `.tar.xz` set from
@@ -116,12 +117,13 @@ out of `main` while still shipping them through a plain Cargo git dependency:
   repo, and extracts into `slang-sys/vendor-local/<platform>/`, which is
   gitignored. This is how `main` development and CI get a working
   `--features static` build: one command, no environment variables.
-- `just release <tag>` re-runs the fetch, moves the trees to
+- `just release <tag>` re-runs the fetch, copies the `.tar.xz` archives to
   `slang-sys/vendor/` (not gitignored), commits, tags, and pushes **only the
   tag** — never `main`. The local branch is then reset, so the release commit
   has a `main` commit as parent but is reachable only from its tag. **There are
   no release branches.**
-- Consumers pin `tag = "vX"` rather than `branch = "main"`.
+- Consumers pin `tag = "vX"` rather than `branch = "main"`; their `build.rs`
+  verifies and expands the vendored archive into `OUT_DIR` on first build.
 
 This works because Cargo fetches a git dependency with a targeted refspec derived
 from the manifest reference — `refs/heads/<branch>` for `branch`, `refs/tags/<tag>`
@@ -138,8 +140,8 @@ Caveats:
   `SLANG_STATIC_ARCHIVE_DIR` environment variable from earlier revisions of
   this plan is dropped; CI runs the same recipe a developer does.
 - A human `git clone` still pulls all tags, and with them every release's
-  binaries — this bites harder than under the archive scheme, at ~115 MB per
-  tag. Use `--single-branch --no-tags` for a small working clone.
+  archives — 62.3 MB per tag. Use `--single-branch --no-tags` for a small
+  working clone.
 - Server-side repository size still grows per release. Only per-consumer transfer
   is bounded.
 - **Verify empirically before committing to this.** Once the first release exists,
@@ -170,7 +172,7 @@ Switch both to `c_char`, matching upstream
 Land this as its own commit ahead of the vendoring work — it is small, orthogonal,
 and unblocks arm64 testing of everything that follows.
 
-### 2. Add the justfile; vendor extracted trees on release tags only
+### 2. Add the justfile; vendor the archives on release tags only
 
 Two recipes at the repo root, plus a committed manifest pinning the source
 release tag (`v2026.13.1-static`) and the three `.tar.xz` SHA-256 hashes
@@ -195,14 +197,16 @@ runs for maintainers and CI, never for consumers.
 
 1. Require a clean working tree on an up-to-date `main`.
 2. Run `just fetch-static` (re-verifies the hashes).
-3. Move `slang-sys/vendor-local/<platform>/` → `slang-sys/vendor/<platform>/`.
+3. Copy the three `.tar.xz` from `vendor-local/` into `slang-sys/vendor/`.
 4. Commit, tag `<tag>`, push only the tag, and reset the local branch — the
    release commit never lands on `main`.
 
-The vendored trees are plain git blobs — Cargo git dependencies do not resolve
-LFS pointers, so LFS stays off the table. Provenance of a vendored tree remains
-checkable after the fact: re-run `just fetch-static` and diff `vendor/` against
-`vendor-local/`.
+The vendored archives are plain git blobs — Cargo git dependencies do not
+resolve LFS pointers, so LFS stays off the table (and nothing vendored may
+exceed GitHub's 100 MB hard limit, which is what killed the extracted-trees
+revision of this plan). Provenance stays checkable forever: each vendored
+archive is byte-identical to the published release asset and matches the
+committed manifest, which `build.rs` re-verifies before every extraction.
 
 ### 3. Rewrite the `static` path in `build.rs`
 
@@ -210,9 +214,11 @@ Replace the `SLANG_EXTERNAL_DIR` branch with:
 
 1. Map `CARGO_CFG_TARGET_*` to a workflow platform name via the table above; fail
    with a clear message naming any unsupported triple.
-2. Locate the platform tree: `slang-sys/vendor/<platform>/` if present (release
-   tags), else `slang-sys/vendor-local/<platform>/` (populated by
-   `just fetch-static`), else fail with a message saying to run
+2. Locate the platform tree: if `slang-sys/vendor/` holds this platform's
+   `.tar.xz` (release tags), verify it against the committed manifest and
+   expand it into `OUT_DIR` — once per profile, behind a marker file; else use
+   `slang-sys/vendor-local/<platform>/` (populated by `just fetch-static`),
+   linked in place with no extraction; else fail with a message saying to run
    `just fetch-static` on `main` or depend on a release tag.
 3. Emit one `rustc-link-search=native=<tree>/lib`.
 4. Emit **one** `rustc-link-lib=static=slang-static`. Delete the six existing
@@ -225,11 +231,13 @@ Replace the `SLANG_EXTERNAL_DIR` branch with:
 6. Point the bindgen header at `<tree>/include`, so a static build needs
    no `SLANG_DIR` / `SLANG_INCLUDE_DIR` / `VULKAN_SDK` at all.
 
-There is no extraction step: the vendored library is linked where it sits, and
-`build.rs` writes nothing library-related anywhere — no new build-dependencies.
-Net effect: four search paths become one, six link libraries become one, all
-`Release/` guesswork disappears, and the static build stops depending on any
-environment variable. The dynamic path keeps its current behaviour untouched.
+Extraction is done with pure-Rust crates (`lzma-rs`, `tar`, `sha2`) rather
+than by shelling out to `tar`, whose availability and flag handling differ on
+Windows; they are optional build-dependencies compiled only for the `static`
+feature. Net effect: four search paths become one, six link libraries become
+one, all `Release/` guesswork disappears, and the static build stops depending
+on any environment variable. The dynamic path keeps its current behaviour
+untouched.
 
 ### 4. Add `-DSLANG_STATIC` to the bindgen clang args
 
@@ -319,10 +327,13 @@ Platform notes:
 - **Linux** needs a runner with glibc ≥ 2.28, the floor set by building in
   `manylinux_2_28`. `ubuntu-22.04` satisfies this.
 
-`build.rs` does no extraction, so nothing at consumer build time depends on
-`tar` or `xz` availability. Only the fetch recipe does, and it runs on
-maintainer machines and CI runners, all of which have bsdtar. The runners do
-need `just` installed (one setup-action line).
+`build.rs` extracts with Rust crates, so nothing at consumer build time
+depends on `tar` or `xz` binaries. The fetch recipe does shell out to them,
+but it runs on maintainer machines and CI runners, all of which have bsdtar.
+The runners need `just` installed (one setup-action line). Note the coverage
+split: off-tag runs build from `vendor-local/` trees and never exercise the
+archive-extraction path in `build.rs` — only tag runs do. That path is what
+the tag-gated matrix exists to prove before consumers pin the tag.
 
 **Gate the tag on this matrix.** There is no release branch to gate, so the
 matrix runs on tag push, against the vendored tree. A red run means delete the
@@ -405,32 +416,28 @@ Diagnose with `dumpbin /headers` over a few members of `slang-static.lib`,
 grepping for `.debug$S` / `.debug$T`. If present,
 `-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=""` is the lever.
 
-This anomaly is what drove the switch from vendoring archives to vendoring
-extracted trees: an archive-based `build.rs` would have re-extracted ~488 MB
-into `OUT_DIR` on every Windows build of the crate, per project and per
-profile. Vendoring the extracted tree pays that uncompressed cost once per
-cargo checkout instead — but it is now paid by *every* platform's checkout,
-since a tag's tree carries all three platform directories (~630 MB), and it is
-what git packs on the server (zlib takes the Windows lib to roughly the
-`.tar.gz`'s 72 MB). Fixing the underlying bloat would cut both the checkout
-size and the per-release repo growth by well over half; worth chasing, not
-blocking.
+This anomaly briefly drove a switch to vendoring extracted trees — eliminating
+the `OUT_DIR` expansion by committing the libraries directly — before GitHub's
+100 MB hard file limit killed that revision (the 465 MiB `slang-static.lib`
+can never be a git blob on GitHub). With archives vendored again, the
+uncompressed cost lands where it originally did: every Windows build of a
+release tag expands ~490 MB into `OUT_DIR`, once per project and profile.
+Fixing the underlying bloat would shrink that, the 36.7 MB per-release repo
+growth for Windows, and the transfer; worth chasing, not blocking.
 
 ## Risks
 
-**Repository growth.** Binary blobs do not delta, so every Slang version bump
-adds a full set permanently. Committed uncompressed, a set is 61.3 + 79.4 +
-487.8 = **628.5 MB per release**, which git's pack zlib should reduce to
-roughly the `.tar.gz` total — call it **~115 MB per release**, against the
-62.3 MB the superseded vendor-the-`.tar.xz` scheme would have cost. Measure the
-real pack delta when the first release is cut. The tag-only scheme bounds
-*per-consumer* transfer to one release's set, but note a tag-pinned consumer
-checks out all three platforms' uncompressed trees (~630 MB in
-`~/.cargo/git/checkouts`), not just its own. Escape hatches if either becomes
-painful: delete release tags nothing depends on anymore — the commits become
-unreachable and server GC reclaims them — or revisit per-platform release tags.
+**Repository growth.** Compressed archives are opaque blobs git cannot delta,
+so every Slang version bump adds a full set permanently: 13,844,500 +
+11,780,780 + 36,724,456 = **62.3 MB per release**. The tag-only scheme bounds
+*per-consumer* transfer to one release's set; a tag-pinned consumer's checkout
+carries the 62.3 MB of archives plus, on first build, the `OUT_DIR` expansion
+of its own platform's archive (~490 MB on Windows, ~80 MB elsewhere, once per
+profile). Escape hatches if growth becomes painful: delete release tags
+nothing depends on anymore — the commits become unreachable and server GC
+reclaims them — or revisit per-platform release tags.
 
-Windows is ~78% of the uncompressed total and remains the one reducible part —
+Windows is 59% of the per-release total and remains the one reducible part —
 see "Windows static lib size".
 
 **Release ritual.** Cutting a release is `just release <tag>` — one command, no

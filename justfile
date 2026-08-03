@@ -42,7 +42,7 @@ fetch-static:
 regen-bindings:
     cargo build -p shader-slang-sys --no-default-features --features static,regenerate-bindings
 
-# vendor the static libs on a tag-only release commit and push the tag
+# vendor the static lib archives on a tag-only release commit and push the tag
 release tag:
     #!/usr/bin/env sh
     set -eu
@@ -53,11 +53,10 @@ release tag:
     just fetch-static
     mkdir -p "{{ vendor }}"
     for platform in {{ platforms }}; do
-        rm -rf "{{ vendor }}/${platform}"
-        mv "{{ vendor_local }}/${platform}" "{{ vendor }}/${platform}"
+        cp "{{ vendor_local }}/slang-static-{{ slang_version }}-${platform}.tar.xz" "{{ vendor }}/"
     done
     git add "{{ vendor }}"
-    git commit -m "Release {{ tag }}: vendor slang {{ slang_version }} static libs"
+    git commit -m "Release {{ tag }}: vendor slang {{ slang_version }} static lib archives"
     git tag "{{ tag }}"
     git push origin "refs/tags/{{ tag }}"
     git reset --hard origin/main
