@@ -1,6 +1,6 @@
 # 00 — Static Slang via vendored prebuilt libraries
 
-Status: proposed
+Status: implemented on this branch (steps 1–8); first release not yet cut
 Scope: `Giesch/slang-rs` (this repo), with a follow-on bump in `Giesch/vulkan-slang-renderer`
 
 ## Goal
