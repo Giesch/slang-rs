@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  static:
+    name: static (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Mirrors the platforms Giesch/slang's release-static.yml ships.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    env:
+      # Match the deployment target the macos-aarch64 libs are built with.
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: extractions/setup-just@v3
+
+      # Release tags must build from the vendored tree alone — that is the
+      # configuration consumers get — so the fetch only runs off-tag.
+      - name: Require vendored libs on release tags
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: test -d slang-sys/vendor || { echo "release tag without vendored static libs" >&2; exit 1; }
+
+      - name: Fetch static libs
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: just fetch-static
+
+      # Also the consumer smoke test: tests::compile creates a global session
+      # and compiles a shader to SPIR-V at -O3, which exercises the embedded
+      # glslang wrapper (-O0 emits SPIR-V natively and would not).
+      - name: Test
+        run: cargo test --no-default-features --features static
+
+      - name: Test (feature unification, static + default)
+        run: cargo test --features static
+
+      # bindgen output is target-dependent (long width, MSVC struct layout,
+      # c_char signedness), so the diff check runs on every platform to prove
+      # the single committed bindings.rs is valid everywhere.
+      - name: Bindings diff check
+        shell: bash
+        run: |
+          just regen-bindings
+          git diff --exit-code slang-sys/src/bindings.rs

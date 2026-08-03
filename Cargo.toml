@@ -15,6 +15,7 @@ serde = ["shader-slang-sys/serde"]
 default = ["dynamic"]
 dynamic = ["shader-slang-sys/dynamic"]
 static = ["shader-slang-sys/static"]
+regenerate-bindings = ["shader-slang-sys/regenerate-bindings"]
 
 [workspace]
 members = ["slang-sys"]

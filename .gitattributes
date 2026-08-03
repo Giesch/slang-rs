@@ -1,0 +1,4 @@
+# sha256sum -c reads filenames from this file and requires LF line endings;
+# Windows checkouts convert text files to CRLF by default.
+slang-sys/static-release.sha256 text eol=lf
+justfile text eol=lf

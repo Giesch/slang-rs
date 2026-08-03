@@ -1,86 +1,166 @@
-extern crate bindgen;
-
 use std::env;
-
-#[cfg(not(any(feature = "static", feature = "dynamic")))]
-compile_error!("You must enable either the 'static' or 'dynamic' feature.");
-#[cfg(all(feature = "static", feature = "dynamic"))]
-compile_error!("Both 'static' and 'dynamic' features cannot be enabled at the same time.");
+use std::path::PathBuf;
 
 fn main() {
-	println!("cargo:rerun-if-env-changed=SLANG_DIR");
-	println!("cargo:rerun-if-env-changed=SLANG_INCLUDE_DIR");
-	println!("cargo:rerun-if-env-changed=SLANG_LIB_DIR");
-	println!("cargo:rerun-if-env-changed=VULKAN_SDK");
+	// When both features are enabled (Cargo features are additive, so any
+	// dependent enabling default features can cause that), static wins.
+	let static_lib = cfg!(feature = "static");
 
-	let include_dir = if let Ok(dir) = env::var("SLANG_INCLUDE_DIR") {
-		dir
-	} else if let Ok(dir) = env::var("SLANG_DIR") {
-		format!("{dir}/include")
-	} else if let Ok(dir) = env::var("VULKAN_SDK") {
-		format!("{dir}/include/slang")
+	let vendored = if static_lib {
+		let tree = vendored_tree();
+		println!("cargo:rerun-if-changed={}", tree.display());
+
+		println!(
+			"cargo:rustc-link-search=native={}",
+			tree.join("lib").display()
+		);
+		// The release bundles everything (slang, compiler-core, core, miniz,
+		// lz4, cmark-gfm, embedded glslang) into this one library.
+		println!("cargo:rustc-link-lib=static=slang-static");
+
+		// System libraries the slang release's own consumer link check proves
+		// are needed. link-cplusplus supplies the C++ runtime.
+		match env::var("CARGO_CFG_TARGET_OS").unwrap().as_str() {
+			"linux" => {
+				println!("cargo:rustc-link-lib=m");
+				println!("cargo:rustc-link-lib=pthread");
+				println!("cargo:rustc-link-lib=dl");
+			}
+			"macos" => {
+				println!("cargo:rustc-link-lib=m");
+				println!("cargo:rustc-link-lib=pthread");
+			}
+			_ => {}
+		}
+
+		Some(tree)
 	} else {
-		panic!("The environment variable SLANG_INCLUDE_DIR, SLANG_DIR, or VULKAN_SDK must be set");
-	};
+		println!("cargo:rerun-if-env-changed=SLANG_DIR");
+		println!("cargo:rerun-if-env-changed=SLANG_LIB_DIR");
+		println!("cargo:rerun-if-env-changed=VULKAN_SDK");
 
-	let lib_dir = if let Ok(dir) = env::var("SLANG_LIB_DIR") {
-		dir
-	} else if let Ok(dir) = env::var("SLANG_DIR") {
-		format!("{dir}/lib")
-	} else if let Ok(dir) = env::var("VULKAN_SDK") {
-		format!("{dir}/lib")
-	} else {
-		panic!("The environment variable SLANG_LIB_DIR, SLANG_DIR, or VULKAN_SDK must be set");
-	};
-
-	if !lib_dir.is_empty() {
-		println!("cargo:rustc-link-search=native={lib_dir}");
-	}
-
-	#[cfg(feature = "dynamic")]
-	{
-		println!("cargo:rustc-link-lib=dylib=slang");
-	}
-	#[cfg(feature = "static")]
-	{
-		use std::path::Path;
-		let Ok(external_lib_dir) = env::var("SLANG_EXTERNAL_DIR") else {
-			panic!(
-				"The environment variable SLANG_EXTERNAL_DIR must be set: typically set to '<slang_source_directory>/build/external'"
-			);
+		let lib_dir = if let Ok(dir) = env::var("SLANG_LIB_DIR") {
+			dir
+		} else if let Ok(dir) = env::var("SLANG_DIR") {
+			format!("{dir}/lib")
+		} else if let Ok(dir) = env::var("VULKAN_SDK") {
+			format!("{dir}/lib")
+		} else {
+			panic!("The environment variable SLANG_LIB_DIR, SLANG_DIR, or VULKAN_SDK must be set");
 		};
-		let miniz_lib_dir = Path::new(&external_lib_dir).join("miniz/Release/");
-		let lz4_lib_dir = Path::new(&external_lib_dir).join("lz4/build/cmake/Release/");
-		let cmark_lib_dir = Path::new(&external_lib_dir).join("cmark/src/Release/");
 
-		// Add Slang static library search path
-		println!("cargo:rustc-link-search=native={}", lib_dir);
-		println!("cargo:rustc-link-search=native={}", miniz_lib_dir.display());
-		println!("cargo:rustc-link-search=native={}", lz4_lib_dir.display());
-		println!("cargo:rustc-link-search=native={}", cmark_lib_dir.display());
+		if !lib_dir.is_empty() {
+			println!("cargo:rustc-link-search=native={lib_dir}");
+		}
 
-		// Link the core Slang static libraries
-		println!("cargo:rustc-link-lib=static=slang-compiler");
-		println!("cargo:rustc-link-lib=static=compiler-core");
-		println!("cargo:rustc-link-lib=static=core");
-		// External slang dependencies
-		println!("cargo:rustc-link-lib=static=miniz");
-		println!("cargo:rustc-link-lib=static=lz4");
-		println!("cargo:rustc-link-lib=static=cmark-gfm");
+		println!("cargo:rustc-link-lib=dylib=slang");
+
+		None
+	};
+
+	#[cfg(feature = "regenerate-bindings")]
+	regenerate_bindings(vendored.as_deref(), static_lib);
+	#[cfg(not(feature = "regenerate-bindings"))]
+	drop(vendored);
+}
+
+/// Locates the prebuilt static library tree for the current target:
+/// `vendor/<platform>/` on release tags, `vendor-local/<platform>/` on `main`
+/// after `just fetch-static`.
+fn vendored_tree() -> PathBuf {
+	let os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+	let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+	let platform = match (os.as_str(), arch.as_str()) {
+		("linux", "x86_64") => "linux-x86_64",
+		("macos", "aarch64") => "macos-aarch64",
+		("windows", "x86_64") => "windows-x86_64",
+		_ => panic!(
+			"no prebuilt static slang library for target '{}'; static libs ship for \
+			 x86_64-unknown-linux-gnu, aarch64-apple-darwin, and x86_64-pc-windows-msvc",
+			env::var("TARGET").unwrap_or_default()
+		),
+	};
+
+	let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+	let vendored = manifest_dir.join("vendor").join(platform);
+	if vendored.is_dir() {
+		return vendored;
 	}
+	let local = manifest_dir.join("vendor-local").join(platform);
+	if local.is_dir() {
+		return local;
+	}
+	panic!(
+		"static slang libraries not found in {} or {}; run `just fetch-static`, \
+		 or depend on a release tag that vendors them",
+		vendored.display(),
+		local.display()
+	);
+}
 
-	let out_dir = env::var("OUT_DIR").expect("Couldn't determine output directory.");
+/// Regenerates `src/bindings.rs` from the slang headers. Opt-in because the
+/// committed bindings are authoritative: headers and libraries ship together
+/// in the vendored release, so the two cannot skew.
+#[cfg(feature = "regenerate-bindings")]
+fn regenerate_bindings(vendored: Option<&std::path::Path>, static_lib: bool) {
+	let include_dir = match vendored {
+		Some(tree) => tree.join("include").display().to_string(),
+		None => {
+			println!("cargo:rerun-if-env-changed=SLANG_INCLUDE_DIR");
+			if let Ok(dir) = env::var("SLANG_INCLUDE_DIR") {
+				dir
+			} else if let Ok(dir) = env::var("SLANG_DIR") {
+				format!("{dir}/include")
+			} else if let Ok(dir) = env::var("VULKAN_SDK") {
+				format!("{dir}/include/slang")
+			} else {
+				panic!(
+					"The environment variable SLANG_INCLUDE_DIR, SLANG_DIR, or VULKAN_SDK must be set"
+				);
+			}
+		}
+	};
 
-	bindgen::builder()
+	let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+	let bindings_path = manifest_dir.join("src").join("bindings.rs");
+
+	let mut builder = bindgen::builder()
 		.header(format!("{include_dir}/slang.h").as_str())
 		.clang_arg("-v")
 		.clang_arg("-xc++")
-		.clang_arg("-std=c++17")
+		.clang_arg("-std=c++17");
+
+	if static_lib {
+		// The libraries are compiled with SLANG_STATIC; without it SLANG_API
+		// resolves to __declspec(dllimport) on MSVC while the library exports
+		// plain symbols.
+		builder = builder.clang_arg("-DSLANG_STATIC");
+	}
+
+	builder
 		.allowlist_function("spReflection.*")
 		.allowlist_function("spComputeStringHash")
 		.allowlist_function("slang_.*")
 		.allowlist_type("slang.*")
 		.allowlist_var("SLANG_.*")
+		// Compiler/platform/processor introspection macros describe the
+		// machine the bindings were generated on and vary per target; they are
+		// excluded so the committed bindings are identical across targets.
+		.blocklist_item("SLANG_(CLANG|VC|SNC|GHS|GCC|GCC_FAMILY)")
+		.blocklist_item(
+			"SLANG_(LINUX|OSX|IOS|ANDROID|WINRT|WIN64|WIN32|X360|XBOXONE|PS3|PS4|PSP2|WIIU|WASM)",
+		)
+		.blocklist_item("SLANG_(WINDOWS|APPLE|UNIX|MICROSOFT)_FAMILY")
+		.blocklist_item("SLANG_PROCESSOR_.*")
+		.blocklist_item("SLANG_(PTR_IS_32|PTR_IS_64|LITTLE_ENDIAN|BIG_ENDIAN|UNALIGNED_ACCESS)")
+		.blocklist_item("SLANG_HAS_(EXCEPTIONS|MOVE_SEMANTICS|ENUM_CLASS|BACKTRACE)")
+		.blocklist_item("SLANG_ENABLE_(DIRECTX|DXVK|VKD3D|DXGI_DEBUG|DXBC_SUPPORT|PIX)")
+		// Declared without extern "C", so their #[link_name] bakes in
+		// per-target C++ mangling (Apple prepends an underscore, MSVC mangles
+		// differently). Unused by this crate's wrapper; excluded to keep the
+		// bindings portable.
+		.blocklist_function("spReflection_GetSession")
+		.blocklist_function("slang_getEmbeddedCoreModule")
 		.with_codegen_config(
 			bindgen::CodegenConfig::FUNCTIONS
 				| bindgen::CodegenConfig::TYPES
@@ -97,13 +177,51 @@ fn main() {
 		.derive_copy(true)
 		.generate()
 		.expect("Couldn't generate bindings.")
-		.write_to_file(format!("{out_dir}/bindings.rs").as_str())
+		.write_to_file(&bindings_path)
 		.expect("Couldn't write bindings.");
+
+	normalize_enum_reprs(&bindings_path);
 }
 
+/// slang.h declares a few unscoped enums without a fixed underlying type.
+/// MSVC gives those `int`, while the Itanium ABI picks `unsigned int` when no
+/// enumerator is negative, so bindgen's `#[repr]` for them varies by target.
+/// Normalize to the Itanium result so the committed bindings are
+/// target-independent; both are 32-bit, so the ABI is unchanged.
+#[cfg(feature = "regenerate-bindings")]
+fn normalize_enum_reprs(bindings_path: &std::path::Path) {
+	const ITANIUM_U32_ENUMS: &[&str] = &[
+		"_bindgen_ty_1",
+		"_bindgen_ty_2",
+		"_bindgen_ty_3",
+		"slang__bindgen_ty_1",
+		"SlangReflectionGenericArgType",
+	];
+
+	let generated = std::fs::read_to_string(bindings_path).expect("Couldn't read bindings.");
+	let mut lines: Vec<&str> = generated.lines().collect();
+	for i in 0..lines.len() {
+		if lines[i] != "#[repr(i32)]" {
+			continue;
+		}
+		// The enum declaration follows within a few lines, after attributes.
+		let is_target = lines[i..lines.len().min(i + 4)].iter().any(|line| {
+			line.strip_prefix("pub enum ")
+				.map(|rest| ITANIUM_U32_ENUMS.contains(&rest.trim_end_matches(" {")))
+				.unwrap_or(false)
+		});
+		if is_target {
+			lines[i] = "#[repr(u32)]";
+		}
+	}
+	std::fs::write(bindings_path, lines.join("\n") + "\n").expect("Couldn't write bindings.");
+}
+
+#[cfg(feature = "regenerate-bindings")]
 #[derive(Debug)]
 struct ParseCallback {}
 
+#[cfg(feature = "regenerate-bindings")]
 impl bindgen::callbacks::ParseCallbacks for ParseCallback {
 	fn enum_variant_name(
 		&self,
@@ -125,10 +243,15 @@ impl bindgen::callbacks::ParseCallbacks for ParseCallback {
 		Some(new_variant_name.to_string())
 	}
 
-	#[cfg(feature = "serde")]
-	fn add_derives(&self, info: &bindgen::callbacks::DeriveInfo<'_>) -> Vec<String> {
+	// The committed bindings are feature-independent: serde derives are baked
+	// in behind cfg_attr rather than added only when regenerating with the
+	// serde feature enabled.
+	fn add_attributes(&self, info: &bindgen::callbacks::AttributeInfo<'_>) -> Vec<String> {
 		if info.name.starts_with("Slang") && info.kind == bindgen::callbacks::TypeKind::Enum {
-			return vec!["serde::Serialize".into(), "serde::Deserialize".into()];
+			return vec![
+				r#"#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]"#
+					.into(),
+			];
 		}
 		vec![]
 	}
@@ -136,6 +259,7 @@ impl bindgen::callbacks::ParseCallbacks for ParseCallback {
 
 /// Converts `snake_case` or `SNAKE_CASE` to `PascalCase`.
 /// If the input is already in `PascalCase` it will be returned as is.
+#[cfg(feature = "regenerate-bindings")]
 fn pascal_case_from_snake_case(snake_case: &str) -> String {
 	let mut result = String::new();
 

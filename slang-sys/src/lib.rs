@@ -5,7 +5,7 @@
 
 #[cfg(feature = "static")]
 extern crate link_cplusplus;
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+include!("bindings.rs");
 
 use std::ffi::{c_char, c_int, c_void};
 
