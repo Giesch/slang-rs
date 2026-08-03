@@ -64,7 +64,9 @@ shader-slang = { git = "https://github.com/Giesch/slang-rs", tag = "<release tag
 
 Pin a `tag`, not a `branch` or bare `rev`: the static libs exist only in
 release-tag commits, which keeps them out of `main`'s history and means Cargo
-only transfers one release's set.
+only transfers one release's set. On first build, `build.rs` verifies the
+vendored archive against its pinned SHA-256 and expands it into the build
+directory — once per profile; note the Windows library is ~490 MB expanded.
 
 Static libs ship for these targets, built by
 [`Giesch/slang`](https://github.com/Giesch/slang)'s `release-static.yml`:
