@@ -136,49 +136,6 @@ where
 		}
 	}
 }
-pub const SLANG_CLANG: u32 = 1;
-pub const SLANG_VC: u32 = 0;
-pub const SLANG_SNC: u32 = 0;
-pub const SLANG_GHS: u32 = 0;
-pub const SLANG_GCC: u32 = 0;
-pub const SLANG_LINUX: u32 = 1;
-pub const SLANG_WINRT: u32 = 0;
-pub const SLANG_XBOXONE: u32 = 0;
-pub const SLANG_WIN64: u32 = 0;
-pub const SLANG_X360: u32 = 0;
-pub const SLANG_WIN32: u32 = 0;
-pub const SLANG_ANDROID: u32 = 0;
-pub const SLANG_IOS: u32 = 0;
-pub const SLANG_OSX: u32 = 0;
-pub const SLANG_PS3: u32 = 0;
-pub const SLANG_PS4: u32 = 0;
-pub const SLANG_PSP2: u32 = 0;
-pub const SLANG_WIIU: u32 = 0;
-pub const SLANG_WASM: u32 = 0;
-pub const SLANG_ENABLE_DXVK: u32 = 0;
-pub const SLANG_ENABLE_VKD3D: u32 = 0;
-pub const SLANG_ENABLE_DXGI_DEBUG: u32 = 0;
-pub const SLANG_ENABLE_DXBC_SUPPORT: u32 = 0;
-pub const SLANG_ENABLE_PIX: u32 = 0;
-pub const SLANG_HAS_EXCEPTIONS: u32 = 1;
-pub const SLANG_HAS_MOVE_SEMANTICS: u32 = 1;
-pub const SLANG_HAS_ENUM_CLASS: u32 = 1;
-pub const SLANG_PROCESSOR_X86_64: u32 = 1;
-pub const SLANG_PROCESSOR_ARM: u32 = 0;
-pub const SLANG_PROCESSOR_ARM_64: u32 = 0;
-pub const SLANG_PROCESSOR_X86: u32 = 0;
-pub const SLANG_PROCESSOR_POWER_PC: u32 = 0;
-pub const SLANG_PROCESSOR_POWER_PC_64: u32 = 0;
-pub const SLANG_PROCESSOR_WASM: u32 = 0;
-pub const SLANG_PROCESSOR_FAMILY_X86: u32 = 1;
-pub const SLANG_PROCESSOR_FAMILY_ARM: u32 = 0;
-pub const SLANG_PROCESSOR_FAMILY_POWER_PC: u32 = 0;
-pub const SLANG_PTR_IS_64: u32 = 1;
-pub const SLANG_PTR_IS_32: u32 = 0;
-pub const SLANG_LITTLE_ENDIAN: u32 = 1;
-pub const SLANG_UNALIGNED_ACCESS: u32 = 1;
-pub const SLANG_BIG_ENDIAN: u32 = 0;
-pub const SLANG_HAS_BACKTRACE: u32 = 1;
 pub const SLANG_FACILITY_WIN_GENERAL: u32 = 0;
 pub const SLANG_FACILITY_WIN_INTERFACE: u32 = 4;
 pub const SLANG_FACILITY_WIN_API: u32 = 7;
@@ -2858,10 +2815,6 @@ unsafe extern "C" {
 	#[doc = " Get the descriptor set/space index reserved for the bindless resource heap.\n\n This is a layout/reflection reservation made before final target lowering and\n optimization. It can remain non-negative even when the emitted target code no\n longer uses a bindless heap/resource-handle path. Query `IBindlessResourceMetadata`\n from target metadata to determine whether such a path survived in the compiled\n target IR.\n\n Returns -1 only when no bindless heap space was reserved for the program layout."]
 	pub fn spReflection_getBindlessSpaceIndex(reflection: *mut SlangReflection) -> SlangInt;
 }
-unsafe extern "C" {
-	#[link_name = "\u{1}_Z23spReflection_GetSessionP18SlangProgramLayout"]
-	pub fn spReflection_GetSession(reflection: *mut SlangReflection) -> *mut slang_ISession;
-}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct SlangGlobalSessionDesc {
@@ -2934,10 +2887,6 @@ unsafe extern "C" {
 		apiVersion: SlangInt,
 		outGlobalSession: *mut *mut slang_IGlobalSession,
 	) -> SlangResult;
-}
-unsafe extern "C" {
-	#[link_name = "\u{1}_Z27slang_getEmbeddedCoreModulev"]
-	pub fn slang_getEmbeddedCoreModule() -> *mut ISlangBlob;
 }
 unsafe extern "C" {
 	pub fn slang_shutdown();

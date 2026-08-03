@@ -143,6 +143,22 @@ fn regenerate_bindings(vendored: Option<&std::path::Path>, static_lib: bool) {
 		.allowlist_function("slang_.*")
 		.allowlist_type("slang.*")
 		.allowlist_var("SLANG_.*")
+		// Compiler/platform/processor introspection macros describe the
+		// machine the bindings were generated on and vary per target; they are
+		// excluded so the committed bindings are identical across targets.
+		.blocklist_item("SLANG_(CLANG|VC|SNC|GHS|GCC|GCC_FAMILY)")
+		.blocklist_item("SLANG_(LINUX|OSX|IOS|ANDROID|WINRT|WIN64|WIN32|X360|XBOXONE|PS3|PS4|PSP2|WIIU|WASM)")
+		.blocklist_item("SLANG_(WINDOWS|APPLE|UNIX|MICROSOFT)_FAMILY")
+		.blocklist_item("SLANG_PROCESSOR_.*")
+		.blocklist_item("SLANG_(PTR_IS_32|PTR_IS_64|LITTLE_ENDIAN|BIG_ENDIAN|UNALIGNED_ACCESS)")
+		.blocklist_item("SLANG_HAS_(EXCEPTIONS|MOVE_SEMANTICS|ENUM_CLASS|BACKTRACE)")
+		.blocklist_item("SLANG_ENABLE_(DIRECTX|DXVK|VKD3D|DXGI_DEBUG|DXBC_SUPPORT|PIX)")
+		// Declared without extern "C", so their #[link_name] bakes in
+		// per-target C++ mangling (Apple prepends an underscore, MSVC mangles
+		// differently). Unused by this crate's wrapper; excluded to keep the
+		// bindings portable.
+		.blocklist_function("spReflection_GetSession")
+		.blocklist_function("slang_getEmbeddedCoreModule")
 		.with_codegen_config(
 			bindgen::CodegenConfig::FUNCTIONS
 				| bindgen::CodegenConfig::TYPES
