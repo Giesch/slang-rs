@@ -295,6 +295,12 @@ Three jobs per platform:
    rather than assuming, since assuming is what makes the rustified-enum hazard
    in upstream #35 real rather than theoretical.
 
+   *Outcome, from the first real runs:* one file suffices. The only variance
+   was platform-introspection macros, the `#[link_name]` mangling of the two
+   functions slang.h declares without `extern "C"` (both unused here — now
+   blocklisted), and MSVC giving `int` to five unscoped enums where Itanium
+   picks `unsigned int` (normalized to `u32` after generation; both 32-bit).
+
 3. **Consumer smoke test** — an example that creates a global session and
    compiles a shader to SPIR-V at `-O3` through the Rust API. The slang
    workflow's own consumer check proves the archive links from C++; this proves

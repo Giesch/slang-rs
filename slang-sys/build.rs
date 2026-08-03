@@ -147,7 +147,9 @@ fn regenerate_bindings(vendored: Option<&std::path::Path>, static_lib: bool) {
 		// machine the bindings were generated on and vary per target; they are
 		// excluded so the committed bindings are identical across targets.
 		.blocklist_item("SLANG_(CLANG|VC|SNC|GHS|GCC|GCC_FAMILY)")
-		.blocklist_item("SLANG_(LINUX|OSX|IOS|ANDROID|WINRT|WIN64|WIN32|X360|XBOXONE|PS3|PS4|PSP2|WIIU|WASM)")
+		.blocklist_item(
+			"SLANG_(LINUX|OSX|IOS|ANDROID|WINRT|WIN64|WIN32|X360|XBOXONE|PS3|PS4|PSP2|WIIU|WASM)",
+		)
 		.blocklist_item("SLANG_(WINDOWS|APPLE|UNIX|MICROSOFT)_FAMILY")
 		.blocklist_item("SLANG_PROCESSOR_.*")
 		.blocklist_item("SLANG_(PTR_IS_32|PTR_IS_64|LITTLE_ENDIAN|BIG_ENDIAN|UNALIGNED_ACCESS)")
@@ -177,6 +179,42 @@ fn regenerate_bindings(vendored: Option<&std::path::Path>, static_lib: bool) {
 		.expect("Couldn't generate bindings.")
 		.write_to_file(&bindings_path)
 		.expect("Couldn't write bindings.");
+
+	normalize_enum_reprs(&bindings_path);
+}
+
+/// slang.h declares a few unscoped enums without a fixed underlying type.
+/// MSVC gives those `int`, while the Itanium ABI picks `unsigned int` when no
+/// enumerator is negative, so bindgen's `#[repr]` for them varies by target.
+/// Normalize to the Itanium result so the committed bindings are
+/// target-independent; both are 32-bit, so the ABI is unchanged.
+#[cfg(feature = "regenerate-bindings")]
+fn normalize_enum_reprs(bindings_path: &std::path::Path) {
+	const ITANIUM_U32_ENUMS: &[&str] = &[
+		"_bindgen_ty_1",
+		"_bindgen_ty_2",
+		"_bindgen_ty_3",
+		"slang__bindgen_ty_1",
+		"SlangReflectionGenericArgType",
+	];
+
+	let generated = std::fs::read_to_string(bindings_path).expect("Couldn't read bindings.");
+	let mut lines: Vec<&str> = generated.lines().collect();
+	for i in 0..lines.len() {
+		if lines[i] != "#[repr(i32)]" {
+			continue;
+		}
+		// The enum declaration follows within a few lines, after attributes.
+		let is_target = lines[i..lines.len().min(i + 4)].iter().any(|line| {
+			line.strip_prefix("pub enum ")
+				.map(|rest| ITANIUM_U32_ENUMS.contains(&rest.trim_end_matches(" {")))
+				.unwrap_or(false)
+		});
+		if is_target {
+			lines[i] = "#[repr(u32)]";
+		}
+	}
+	std::fs::write(bindings_path, lines.join("\n") + "\n").expect("Couldn't write bindings.");
 }
 
 #[cfg(feature = "regenerate-bindings")]
