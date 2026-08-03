@@ -51,23 +51,57 @@ let shader_bytecode = linked_program.entry_point_code(0, 0).unwrap();
 
 ## Installation
 
-Add `shader-slang` to the `[dependencies]` section of your `Cargo.toml`.
+### Static linking (recommended)
 
-Point this library to a Slang installation. An easy way is by installing the [LunarG Vulkan SDK](https://vulkan.lunarg.com) which comes bundled with the Slang compiler. During installation `VULKAN_SDK` is added to the `PATH` and automatically picked up by this library.
+The `static` feature links prebuilt static Slang libraries that are vendored
+into this repository on release tags — no Slang installation, no environment
+variables. Depend on a release tag, not on `main`:
 
-Alternatively, download Slang from their [releases page](https://github.com/shader-slang/slang/releases) and manually set the `SLANG_DIR` environment variable to the path of your Slang directory.
+```toml
+[dependencies]
+shader-slang = { git = "https://github.com/Giesch/slang-rs", tag = "<release tag>", default-features = false, features = ["static"] }
+```
 
-To specify the `include` and `lib` directories separately, set the `SLANG_INCLUDE_DIR` and `SLANG_LIB_DIR` environment variables.
+Pin a `tag`, not a `branch` or bare `rev`: the static libs exist only in
+release-tag commits, which keeps them out of `main`'s history and means Cargo
+only transfers one release's set.
+
+Static libs ship for these targets, built by
+[`Giesch/slang`](https://github.com/Giesch/slang)'s `release-static.yml`:
+
+| Rust target triple | notes |
+| --- | --- |
+| `x86_64-unknown-linux-gnu` | needs glibc ≥ 2.28 |
+| `aarch64-apple-darwin` | macOS deployment target 13.0 |
+| `x86_64-pc-windows-msvc` | built against the DLL CRT (`MultiThreadedDLL`), matching Rust's default — do not enable `+crt-static` |
+
+When working on this repository itself (or building `main` with
+`--features static`), run `just fetch-static` first: it downloads the pinned
+Slang release, verifies it against the committed SHA-256 manifest, and
+extracts it into a gitignored directory that `build.rs` picks up.
 
 ### Dynamic linking
 
-Using feature `dynamic` will dynamically link slang and its dependencies: Copy `slang.dll` to your executable's directory. To compile to DXIL bytecode, also copy `dxil.dll` and `dxcompiler.dll` from the [Microsoft DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler/releases) to your executable's directory.
+The default `dynamic` feature links against an existing Slang installation.
+Point this library at one via environment variables: install the
+[LunarG Vulkan SDK](https://vulkan.lunarg.com) (sets `VULKAN_SDK`, picked up
+automatically), or download Slang from their
+[releases page](https://github.com/shader-slang/slang/releases) and set
+`SLANG_DIR` to the Slang directory. To specify the `lib` directory separately,
+set `SLANG_LIB_DIR`.
 
-### Static linking
+At runtime, copy `slang.dll` to your executable's directory. To compile to
+DXIL bytecode, also copy `dxil.dll` and `dxcompiler.dll` from the
+[Microsoft DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler/releases)
+to your executable's directory.
 
-Use the `static` feature to link statically slang and its dependencies. When compiling, you'll need this additional environment variable:
+### Bindings
 
-- `SLANG_EXTERNAL_DIR`: typically set to '[<slang_source_directory>](https://github.com/shader-slang/slang)/build/external'
+Generated bindings are checked in, so the default build needs neither bindgen
+nor libclang. To regenerate after bumping the pinned Slang release, run
+`just regen-bindings` (or build with the `regenerate-bindings` feature, which
+also requires `SLANG_INCLUDE_DIR`/`SLANG_DIR`/`VULKAN_SDK` when used with
+dynamic linking).
 
 ## Credits
 
