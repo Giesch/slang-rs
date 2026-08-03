@@ -2,5 +2,7 @@ debug/
 target/
 Cargo.lock
 
+slang-sys/vendor-local/
+
 .cargo/
 .vscode/
