@@ -24,12 +24,11 @@ offline, network-free builds. To keep the blobs out of `main`'s history they liv
 only on release branches — see "Where the archives live" below.
 
 **We vendor `.tar.xz`, not `.tar.gz`.** These blobs are committed permanently, so
-compression ratio is the one cost that never goes away. `Giesch/slang` must
-therefore publish a `.tar.xz` per platform as a release asset, alongside the
-existing `.tar.gz` and `.zip` — that is a hard dependency of step 2, not a
-preference. Vendoring a locally recompressed archive is explicitly rejected: it
-would break the SHA-256-against-published-asset check that makes the manifest
-worth having.
+compression ratio is the one cost that never goes away. `Giesch/slang` now
+publishes a `.tar.xz` per platform alongside the `.tar.gz` and `.zip`, which cut
+a vendored set from 114.7 MB to 62.3 MB. Vendoring a locally recompressed archive
+is explicitly rejected: it would break the SHA-256-against-published-asset check
+that makes the manifest worth having.
 
 ## Where things stand
 
@@ -72,9 +71,9 @@ Three platforms ship, named by the workflow's own labels rather than Rust triple
 | `macos-aarch64` | `aarch64-apple-darwin` | native arm64, `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` |
 | `windows-x86_64` | `x86_64-pc-windows-msvc` | `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL` |
 
-Packaged as `slang-static-<version>-<platform>.tar.gz` and `.zip`, each expanding
-to `lib/`, `include/`, `licenses/`. A `.tar.xz` is to be added — see "Remaining
-prerequisite" — and is what we vendor.
+Packaged as `slang-static-<version>-<platform>` in `.tar.gz`, `.tar.xz` and
+`.zip`, each expanding to `lib/`, `include/`, `licenses/`. We vendor the
+`.tar.xz`.
 
 **`slang-glslang` is not dynamically loaded.** The build sets
 `SLANG_EMBED_SLANG_GLSLANG=ON` with `SLANG_ENABLE_SLANG_GLSLANG=OFF`, and a
@@ -91,9 +90,8 @@ The workflow's own consumer link check also pins down what a consumer must pass:
 
 ## Where the archives live
 
-Keeping a per-release set of compressed blobs — 114.7 MB as `.tar.gz` today,
-projected ~71 MB as `.tar.xz` — out of `main` while still shipping them through a
-plain Cargo git dependency:
+Keeping a per-release set of compressed blobs — 62.3 MB as `.tar.xz` — out of
+`main` while still shipping them through a plain Cargo git dependency:
 
 - `main` holds source only, no archives, ever.
 - Each release branches `release/vX` from a `main` commit, adds
@@ -156,18 +154,13 @@ For the current release that is:
     vendor/slang-static-2026.13.1-macos-aarch64.tar.xz
     vendor/slang-static-2026.13.1-windows-x86_64.tar.xz
 
-**Blocked until `Giesch/slang` publishes `.tar.xz` assets** — see "Remaining
-prerequisite". The `.tar.gz` currently published would work mechanically, but
-these blobs are permanent, and re-vendoring later to save ~44 MB would mean
-another full set in history rather than a replacement of the old one. Wait for
-the format.
+Unblocked: `v2026.13.1-static` ships `.tar.xz` per platform, 62.3 MB for the set.
 
 Vendor the archives **exactly as published**, so each blob's SHA-256 can be
-checked against the release asset — the published `SHA256SUMS` already matches
-GitHub's own asset digests, and will cover the `.tar.xz` too once the publish
-job's `dist/*` glob picks it up. Never recompress locally: it saves the same
-space but destroys that check, which is the whole reason the manifest is worth
-having.
+checked against the release asset — the published `SHA256SUMS` covers all nine
+assets, and the three `.tar.xz` hashes are recorded under "Upstream release".
+Never recompress locally: it saves nothing now and destroys that check, which is
+the whole reason the manifest is worth having.
 
 Record the source release tag (`v2026.13.1-static`) and each SHA-256 in a
 committed manifest. Plain git blobs only — Cargo git dependencies do not resolve
@@ -312,96 +305,77 @@ them. Grep `shaders/source/` before switching.
 
 ## Upstream release — available
 
-**`Giesch/slang` `v2026.13.1-static` is published** (release 363909842,
-2026-08-02), non-draft, seven assets. This clears the first prerequisite; step 2
-can proceed.
+**`Giesch/slang` `v2026.13.1-static` is published**, re-cut after the xz change,
+with nine assets: `.tar.gz`, `.tar.xz` and `.zip` per platform, plus `SHA256SUMS`.
+Both prerequisites are now cleared and step 2 can proceed.
 
-Verified directly against the published Linux archive:
+Verified directly against the published archives:
 
-- `SHA256SUMS` is published and matches GitHub's own asset digests on all six
-  archives. The Linux `.tar.gz` was downloaded and checksummed: **OK**.
-- `lib/` contains **exactly one file** — `libslang-static.a`, 79,440,832 bytes.
-  No `libslang-compiler.a`. This is the invariant step 3 depends on, now
-  confirmed from the shipped artifact rather than inferred from the workflow.
-- `include/` holds 16 headers; `licenses/` holds 19 entries including the
-  `slang-LICENSES/` subtree.
-- The consumer link check passed on all three platforms against the packaged
-  tree alone — `-I<base>/include`, the one archive, and `-lstdc++ -lm -lpthread
-  -ldl` on Linux — and the resulting binary ran.
+- All three `.tar.xz` were downloaded and checked against the published
+  `SHA256SUMS`: **OK**.
+- `lib/` contains **exactly one file** on every platform — no
+  `libslang-compiler.a`. This is the invariant step 3 depends on, now confirmed
+  from the shipped artifact on all three rather than inferred from the workflow.
+- The consumer link check passed on all three platforms against the packaged tree
+  alone.
 
-Published asset sizes, exact:
+| platform | `.tar.gz` | `.tar.xz` | ratio | `lib/` contents, uncompressed |
+| --- | --- | --- | --- | --- |
+| macos-aarch64 | 19.8 MB | **11.8 MB** | 0.59 | `libslang-static.a` — 61,266,912 |
+| linux-x86_64 | 22.8 MB | **13.8 MB** | 0.61 | `libslang-static.a` — 79,440,832 |
+| windows-x86_64 | 72.0 MB | **36.7 MB** | 0.51 | `slang-static.lib` — 487,825,608 |
+| **total** | **114.7 MB** | **62.3 MB** | 0.54 | |
 
-| platform | `.tar.gz` | `.zip` |
-| --- | --- | --- |
-| macos-aarch64 | 19,847,626 (19.8 MB) | 19,280,331 (19.3 MB) |
-| linux-x86_64 | 22,819,764 (22.8 MB) | 22,067,549 (22.1 MB) |
-| windows-x86_64 | 72,028,693 (72.0 MB) | 70,665,271 (70.7 MB) |
+xz beat the projection: 62.3 MB against the ~71 MB this plan estimated, a 52.3 MB
+saving over `.tar.gz`. Windows outperformed the 0.62 ratio the others hold to,
+landing at 0.51 — consistent with the guess that its bulk is highly compressible
+debug records, which xz exploits more than gzip.
 
-SHA-256 of the three `.tar.gz` archives, for the step 2 manifest:
+SHA-256 of the three `.tar.xz`, for the step 2 manifest:
 
 ```
-4aa095759262d1e475ab3b9f04dc97bd709219a1560ebc093874551e8ad9f73f  slang-static-2026.13.1-linux-x86_64.tar.gz
-4e5d556e54124cb6077060c0e0978c8518ff5e447384de9904853676c1352e4e  slang-static-2026.13.1-macos-aarch64.tar.gz
-ac8b98ac608b3d752c8e21dce431fa24c701c713ca5d5b1be2858a8280a3868a  slang-static-2026.13.1-windows-x86_64.tar.gz
+e9bac199cb346ff832ed83b2cb5ef37b3613ff8644011af6da9fae796325a1b2  slang-static-2026.13.1-linux-x86_64.tar.xz
+2a295356916a72ceba8a292849f03df41d6458c378e562922851397867e1559f  slang-static-2026.13.1-macos-aarch64.tar.xz
+a52c07d29d3b5885a17c61292347bd7ffd022d8f67f6cd5848069bb36216d761  slang-static-2026.13.1-windows-x86_64.tar.xz
 ```
 
-## Remaining prerequisite
+These supersede the hashes recorded before the re-cut. Moving the tag rebuilt
+every asset, so the `.tar.gz` hashes changed too; nothing had been vendored yet,
+so nothing needs re-verifying.
 
-**`Giesch/slang` must publish `.tar.xz` release assets.** This is the one thing
-blocking step 2. Concretely, in `release-static.yml`'s `Package` step:
+## Windows archive size — open, no longer blocking
 
-```bash
-tar -cJf "${BASE}.tar.xz" "$BASE"
-```
+Compression solved the vendoring cost, not the underlying problem. Windows ships
+a **487.8 MB** `slang-static.lib` against 79.4 MB on Linux and 61.3 MB on macOS
+for the same merged content — roughly 6× Linux, a far starker gap than the
+compressed sizes suggested. That it then compresses *better* than the other
+platforms (0.51 against 0.59-0.61) is itself the evidence: the excess is
+redundant, highly compressible data, which points squarely at debug records
+surviving `SLANG_ENABLE_RELEASE_DEBUG_INFO=OFF`.
 
-added alongside the existing `tar -czf` and `zip`, with the new file included in
-the `upload-artifact` paths and picked up by the publish job's `dist/*` glob so
-it lands in `SHA256SUMS` like everything else. Re-tagging is not required to
-prove it out — the `pull_request` trigger already covers
-`.github/workflows/release-static.yml`, so the sizes show up on the PR.
+Diagnose with `dumpbin /headers` over a few members of `slang-static.lib`,
+grepping for `.debug$S` / `.debug$T`. If present,
+`-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=""` is the lever.
 
-Why xz specifically: the published `.zip` is smaller than the `.tar.gz` on every
-platform (70.7 vs 72.0, 22.1 vs 22.8, 19.3 vs 19.8), so the tarball is being
-written at `tar -czf`'s default gzip level rather than `-9`. PR #3 measured the
-Linux archive at 21.6 MB with `gzip -9` against 13.4 MB with `xz -9` — a 0.62
-ratio.
-
-Applying that ratio to the published sizes gives a **projection, not a
-measurement**:
-
-| platform | published `.tar.gz` | projected `.tar.xz` |
-| --- | --- | --- |
-| macos-aarch64 | 19.8 MB | ~12 MB |
-| linux-x86_64 | 22.8 MB | ~14 MB |
-| windows-x86_64 | 72.0 MB | ~45 MB |
-| **total** | **114.7 MB** | **~71 MB** |
-
-Treat those as a lower bound on the benefit rather than a firm number. Windows
-may do better than the ratio suggests: if its bulk really is debug records, that
-is highly compressible data and xz should exploit it more than gzip does. The
-real figures arrive with the PR that adds the format — decide from those.
-
-**Secondary, no longer blocking: diagnose the Windows size.** At 72.0 MB against
-22.8 Linux and 19.8 macOS for the same content, roughly 3× either, something is
-still being embedded despite `SLANG_ENABLE_RELEASE_DEBUG_INFO=OFF`. Worth fixing
-at the source, but xz is the cheaper lever and it lands first. If the `.tar.xz`
-numbers come back acceptable, this can stay a background task.
+This no longer blocks step 2 — 36.7 MB vendored is acceptable — but it is not
+purely cosmetic either, because the **extracted** size is what a Windows consumer
+pays. `build.rs` unpacks the archive into `OUT_DIR`, so every Windows build of
+this crate writes ~488 MB to disk and keeps it in the target directory. That is
+the cost worth quoting when deciding whether to chase this.
 
 ## Risks
 
 **Repository growth.** Compressed archives are opaque blobs, so git
 cannot delta them; every Slang version bump adds the full set permanently. Exact,
-from the published `v2026.13.1-static` assets: 22,819,764 + 19,847,626 +
-72,028,693 = **114.7 MB per release**, close to three times the ~40 MB this plan
-originally assumed. The release-branch scheme bounds *per-consumer* transfer to
-one release's worth, so a tag-pinned consumer still fetches only its own platform
-set — but the repository itself grows by 114.7 MB per bump.
+from the published `v2026.13.1-static` `.tar.xz` assets: 13,844,500 + 11,780,780 +
+36,724,456 = **62.3 MB per release**. The release-branch scheme bounds
+*per-consumer* transfer to one release's worth, so a tag-pinned consumer still
+fetches only its own platform archive — but the repository itself grows by
+62.3 MB per bump. Escape hatch if that becomes painful: periodic history squash of
+old release branches.
 
-That makes the Windows question load-bearing rather than tidy-up: at 72.0 MB it is
-63% of each release. The right lever is a published `.tar.xz` (see "Remaining
-prerequisite"), which keeps the provenance check intact; local recompression does
-not. Escape hatch if it still becomes painful: periodic history squash of old
-release branches.
+Windows is 59% of that total and remains the one reducible part, but at 36.7 MB it
+is no longer the deciding factor — see "Windows archive size".
 
 **Release ritual.** Cutting a release is now a branch-plus-tag operation rather
 than a push to `main`, and fixes wanted in a release have to be cherry-picked onto
