@@ -1,81 +1,89 @@
 extern crate bindgen;
 
 use std::env;
-
-#[cfg(not(any(feature = "static", feature = "dynamic")))]
-compile_error!("You must enable either the 'static' or 'dynamic' feature.");
-#[cfg(all(feature = "static", feature = "dynamic"))]
-compile_error!("Both 'static' and 'dynamic' features cannot be enabled at the same time.");
+use std::path::PathBuf;
 
 fn main() {
-	println!("cargo:rerun-if-env-changed=SLANG_DIR");
-	println!("cargo:rerun-if-env-changed=SLANG_INCLUDE_DIR");
-	println!("cargo:rerun-if-env-changed=SLANG_LIB_DIR");
-	println!("cargo:rerun-if-env-changed=VULKAN_SDK");
+	// When both features are enabled (Cargo features are additive, so any
+	// dependent enabling default features can cause that), static wins.
+	let static_lib = cfg!(feature = "static");
 
-	let include_dir = if let Ok(dir) = env::var("SLANG_INCLUDE_DIR") {
-		dir
-	} else if let Ok(dir) = env::var("SLANG_DIR") {
-		format!("{dir}/include")
-	} else if let Ok(dir) = env::var("VULKAN_SDK") {
-		format!("{dir}/include/slang")
+	let include_dir = if static_lib {
+		let tree = vendored_tree();
+		println!("cargo:rerun-if-changed={}", tree.display());
+
+		println!("cargo:rustc-link-search=native={}", tree.join("lib").display());
+		// The release bundles everything (slang, compiler-core, core, miniz,
+		// lz4, cmark-gfm, embedded glslang) into this one library.
+		println!("cargo:rustc-link-lib=static=slang-static");
+
+		// System libraries the slang release's own consumer link check proves
+		// are needed. link-cplusplus supplies the C++ runtime.
+		match env::var("CARGO_CFG_TARGET_OS").unwrap().as_str() {
+			"linux" => {
+				println!("cargo:rustc-link-lib=m");
+				println!("cargo:rustc-link-lib=pthread");
+				println!("cargo:rustc-link-lib=dl");
+			}
+			"macos" => {
+				println!("cargo:rustc-link-lib=m");
+				println!("cargo:rustc-link-lib=pthread");
+			}
+			_ => {}
+		}
+
+		tree.join("include").display().to_string()
 	} else {
-		panic!("The environment variable SLANG_INCLUDE_DIR, SLANG_DIR, or VULKAN_SDK must be set");
-	};
+		println!("cargo:rerun-if-env-changed=SLANG_DIR");
+		println!("cargo:rerun-if-env-changed=SLANG_INCLUDE_DIR");
+		println!("cargo:rerun-if-env-changed=SLANG_LIB_DIR");
+		println!("cargo:rerun-if-env-changed=VULKAN_SDK");
 
-	let lib_dir = if let Ok(dir) = env::var("SLANG_LIB_DIR") {
-		dir
-	} else if let Ok(dir) = env::var("SLANG_DIR") {
-		format!("{dir}/lib")
-	} else if let Ok(dir) = env::var("VULKAN_SDK") {
-		format!("{dir}/lib")
-	} else {
-		panic!("The environment variable SLANG_LIB_DIR, SLANG_DIR, or VULKAN_SDK must be set");
-	};
-
-	if !lib_dir.is_empty() {
-		println!("cargo:rustc-link-search=native={lib_dir}");
-	}
-
-	#[cfg(feature = "dynamic")]
-	{
-		println!("cargo:rustc-link-lib=dylib=slang");
-	}
-	#[cfg(feature = "static")]
-	{
-		use std::path::Path;
-		let Ok(external_lib_dir) = env::var("SLANG_EXTERNAL_DIR") else {
-			panic!(
-				"The environment variable SLANG_EXTERNAL_DIR must be set: typically set to '<slang_source_directory>/build/external'"
-			);
+		let include_dir = if let Ok(dir) = env::var("SLANG_INCLUDE_DIR") {
+			dir
+		} else if let Ok(dir) = env::var("SLANG_DIR") {
+			format!("{dir}/include")
+		} else if let Ok(dir) = env::var("VULKAN_SDK") {
+			format!("{dir}/include/slang")
+		} else {
+			panic!("The environment variable SLANG_INCLUDE_DIR, SLANG_DIR, or VULKAN_SDK must be set");
 		};
-		let miniz_lib_dir = Path::new(&external_lib_dir).join("miniz/Release/");
-		let lz4_lib_dir = Path::new(&external_lib_dir).join("lz4/build/cmake/Release/");
-		let cmark_lib_dir = Path::new(&external_lib_dir).join("cmark/src/Release/");
 
-		// Add Slang static library search path
-		println!("cargo:rustc-link-search=native={}", lib_dir);
-		println!("cargo:rustc-link-search=native={}", miniz_lib_dir.display());
-		println!("cargo:rustc-link-search=native={}", lz4_lib_dir.display());
-		println!("cargo:rustc-link-search=native={}", cmark_lib_dir.display());
+		let lib_dir = if let Ok(dir) = env::var("SLANG_LIB_DIR") {
+			dir
+		} else if let Ok(dir) = env::var("SLANG_DIR") {
+			format!("{dir}/lib")
+		} else if let Ok(dir) = env::var("VULKAN_SDK") {
+			format!("{dir}/lib")
+		} else {
+			panic!("The environment variable SLANG_LIB_DIR, SLANG_DIR, or VULKAN_SDK must be set");
+		};
 
-		// Link the core Slang static libraries
-		println!("cargo:rustc-link-lib=static=slang-compiler");
-		println!("cargo:rustc-link-lib=static=compiler-core");
-		println!("cargo:rustc-link-lib=static=core");
-		// External slang dependencies
-		println!("cargo:rustc-link-lib=static=miniz");
-		println!("cargo:rustc-link-lib=static=lz4");
-		println!("cargo:rustc-link-lib=static=cmark-gfm");
-	}
+		if !lib_dir.is_empty() {
+			println!("cargo:rustc-link-search=native={lib_dir}");
+		}
+
+		println!("cargo:rustc-link-lib=dylib=slang");
+
+		include_dir
+	};
 
 	let out_dir = env::var("OUT_DIR").expect("Couldn't determine output directory.");
 
-	bindgen::builder()
+	let mut builder = bindgen::builder()
 		.header(format!("{include_dir}/slang.h").as_str())
 		.clang_arg("-v")
 		.clang_arg("-xc++")
-		.clang_arg("-std=c++17")
+		.clang_arg("-std=c++17");
+
+	if static_lib {
+		// The libraries are compiled with SLANG_STATIC; without it SLANG_API
+		// resolves to __declspec(dllimport) on MSVC while the library exports
+		// plain symbols.
+		builder = builder.clang_arg("-DSLANG_STATIC");
+	}
+
+	builder
 		.allowlist_function("spReflection.*")
 		.allowlist_function("spComputeStringHash")
 		.allowlist_function("slang_.*")
@@ -99,6 +107,40 @@ fn main() {
 		.expect("Couldn't generate bindings.")
 		.write_to_file(format!("{out_dir}/bindings.rs").as_str())
 		.expect("Couldn't write bindings.");
+}
+
+/// Locates the prebuilt static library tree for the current target:
+/// `vendor/<platform>/` on release tags, `vendor-local/<platform>/` on `main`
+/// after `just fetch-static`.
+fn vendored_tree() -> PathBuf {
+	let os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+	let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+	let platform = match (os.as_str(), arch.as_str()) {
+		("linux", "x86_64") => "linux-x86_64",
+		("macos", "aarch64") => "macos-aarch64",
+		("windows", "x86_64") => "windows-x86_64",
+		_ => panic!(
+			"no prebuilt static slang library for target '{}'; static libs ship for \
+			 x86_64-unknown-linux-gnu, aarch64-apple-darwin, and x86_64-pc-windows-msvc",
+			env::var("TARGET").unwrap_or_default()
+		),
+	};
+
+	let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+	let vendored = manifest_dir.join("vendor").join(platform);
+	if vendored.is_dir() {
+		return vendored;
+	}
+	let local = manifest_dir.join("vendor-local").join(platform);
+	if local.is_dir() {
+		return local;
+	}
+	panic!(
+		"static slang libraries not found in {} or {}; run `just fetch-static`, \
+		 or depend on a release tag that vendors them",
+		vendored.display(),
+		local.display()
+	);
 }
 
 #[derive(Debug)]

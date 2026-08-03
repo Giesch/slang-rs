@@ -6,6 +6,7 @@ description = "FFI bindings for the Slang shader language compiler"
 repository = "https://github.com/FloatyMonkey/slang-rs"
 license = "MIT OR Apache-2.0"
 categories = ["compilers", "external-ffi-bindings"]
+links = "slang"
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
