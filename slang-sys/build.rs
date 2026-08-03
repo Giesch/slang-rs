@@ -10,7 +10,10 @@ fn main() {
 		let tree = vendored_tree();
 		println!("cargo:rerun-if-changed={}", tree.display());
 
-		println!("cargo:rustc-link-search=native={}", tree.join("lib").display());
+		println!(
+			"cargo:rustc-link-search=native={}",
+			tree.join("lib").display()
+		);
 		// The release bundles everything (slang, compiler-core, core, miniz,
 		// lz4, cmark-gfm, embedded glslang) into this one library.
 		println!("cargo:rustc-link-lib=static=slang-static");
@@ -111,7 +114,9 @@ fn regenerate_bindings(vendored: Option<&std::path::Path>, static_lib: bool) {
 			} else if let Ok(dir) = env::var("VULKAN_SDK") {
 				format!("{dir}/include/slang")
 			} else {
-				panic!("The environment variable SLANG_INCLUDE_DIR, SLANG_DIR, or VULKAN_SDK must be set");
+				panic!(
+					"The environment variable SLANG_INCLUDE_DIR, SLANG_DIR, or VULKAN_SDK must be set"
+				);
 			}
 		}
 	};
