@@ -5,75 +5,75 @@ use crate::{ImageFormat, Modifier, ModifierID, ParameterCategory, Stage, sys};
 pub struct VariableLayout(sys::SlangReflectionVariableLayout);
 
 impl VariableLayout {
-	pub fn variable(&self) -> Option<&Variable> {
-		rcall!(spReflectionVariableLayout_GetVariable(self) as Option<&Variable>)
-	}
+    pub fn variable(&self) -> Option<&Variable> {
+        rcall!(spReflectionVariableLayout_GetVariable(self) as Option<&Variable>)
+    }
 
-	pub fn name(&self) -> Option<&str> {
-		self.variable()?.name()
-	}
+    pub fn name(&self) -> Option<&str> {
+        self.variable()?.name()
+    }
 
-	pub fn find_modifier(&self, id: ModifierID) -> Option<&Modifier> {
-		self.variable().and_then(|v| v.find_modifier(id))
-	}
+    pub fn find_modifier(&self, id: ModifierID) -> Option<&Modifier> {
+        self.variable().and_then(|v| v.find_modifier(id))
+    }
 
-	pub fn type_layout(&self) -> Option<&TypeLayout> {
-		rcall!(spReflectionVariableLayout_GetTypeLayout(self) as Option<&TypeLayout>)
-	}
+    pub fn type_layout(&self) -> Option<&TypeLayout> {
+        rcall!(spReflectionVariableLayout_GetTypeLayout(self) as Option<&TypeLayout>)
+    }
 
-	pub fn category(&self) -> Option<ParameterCategory> {
-		Some(self.type_layout()?.parameter_category())
-	}
+    pub fn category(&self) -> Option<ParameterCategory> {
+        Some(self.type_layout()?.parameter_category())
+    }
 
-	pub fn category_count(&self) -> u32 {
-		self.type_layout().map_or(0, |tl| tl.category_count())
-	}
+    pub fn category_count(&self) -> u32 {
+        self.type_layout().map_or(0, |tl| tl.category_count())
+    }
 
-	pub fn category_by_index(&self, index: u32) -> Option<ParameterCategory> {
-		Some(self.type_layout()?.category_by_index(index))
-	}
+    pub fn category_by_index(&self, index: u32) -> Option<ParameterCategory> {
+        Some(self.type_layout()?.category_by_index(index))
+    }
 
-	pub fn categories(&self) -> impl ExactSizeIterator<Item = ParameterCategory> {
-		(0..self.category_count()).map(|i| self.category_by_index(i).unwrap())
-	}
+    pub fn categories(&self) -> impl ExactSizeIterator<Item = ParameterCategory> {
+        (0..self.category_count()).map(|i| self.category_by_index(i).unwrap())
+    }
 
-	pub fn offset(&self, category: ParameterCategory) -> usize {
-		rcall!(spReflectionVariableLayout_GetOffset(self, category))
-	}
+    pub fn offset(&self, category: ParameterCategory) -> usize {
+        rcall!(spReflectionVariableLayout_GetOffset(self, category))
+    }
 
-	pub fn ty(&self) -> Option<&Type> {
-		self.variable()?.ty()
-	}
+    pub fn ty(&self) -> Option<&Type> {
+        self.variable()?.ty()
+    }
 
-	pub fn binding_index(&self) -> u32 {
-		rcall!(spReflectionParameter_GetBindingIndex(self))
-	}
+    pub fn binding_index(&self) -> u32 {
+        rcall!(spReflectionParameter_GetBindingIndex(self))
+    }
 
-	pub fn binding_space(&self) -> u32 {
-		rcall!(spReflectionParameter_GetBindingSpace(self))
-	}
+    pub fn binding_space(&self) -> u32 {
+        rcall!(spReflectionParameter_GetBindingSpace(self))
+    }
 
-	pub fn binding_space_with_category(&self, category: ParameterCategory) -> usize {
-		rcall!(spReflectionVariableLayout_GetSpace(self, category))
-	}
+    pub fn binding_space_with_category(&self, category: ParameterCategory) -> usize {
+        rcall!(spReflectionVariableLayout_GetSpace(self, category))
+    }
 
-	pub fn image_format(&self) -> ImageFormat {
-		rcall!(spReflectionVariableLayout_GetImageFormat(self))
-	}
+    pub fn image_format(&self) -> ImageFormat {
+        rcall!(spReflectionVariableLayout_GetImageFormat(self))
+    }
 
-	pub fn semantic_name(&self) -> Option<&str> {
-		rcall!(spReflectionVariableLayout_GetSemanticName(self) as Option<&str>)
-	}
+    pub fn semantic_name(&self) -> Option<&str> {
+        rcall!(spReflectionVariableLayout_GetSemanticName(self) as Option<&str>)
+    }
 
-	pub fn semantic_index(&self) -> usize {
-		rcall!(spReflectionVariableLayout_GetSemanticIndex(self))
-	}
+    pub fn semantic_index(&self) -> usize {
+        rcall!(spReflectionVariableLayout_GetSemanticIndex(self))
+    }
 
-	pub fn stage(&self) -> Stage {
-		rcall!(spReflectionVariableLayout_getStage(self))
-	}
+    pub fn stage(&self) -> Stage {
+        rcall!(spReflectionVariableLayout_getStage(self))
+    }
 
-	pub fn pending_data_layout(&self) -> Option<&VariableLayout> {
-		rcall!(spReflectionVariableLayout_getPendingDataLayout(self) as Option<&VariableLayout>)
-	}
+    pub fn pending_data_layout(&self) -> Option<&VariableLayout> {
+        rcall!(spReflectionVariableLayout_getPendingDataLayout(self) as Option<&VariableLayout>)
+    }
 }
