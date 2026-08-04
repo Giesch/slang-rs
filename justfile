@@ -38,9 +38,9 @@ fetch-static:
             --strip-components 1 -C "${platform}"
     done
 
-# regenerate slang-sys/src/bindings.rs from the fetched or vendored headers
+# regenerate slang-sys/src/bindings.rs from the fetched headers
 regen-bindings:
-    cargo build -p shader-slang-sys --features regenerate-bindings
+    cargo run -p xtask -- regen-bindings
 
 # vendor the static lib archives on a tag-only release commit and push the tag
 release tag:

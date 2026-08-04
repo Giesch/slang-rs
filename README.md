@@ -86,6 +86,21 @@ Generated bindings are checked in, so the build needs neither bindgen nor
 libclang. Headers and libraries ship together in the vendored release, so the
 committed bindings are authoritative and cannot skew from the linked library.
 
+To regenerate them after bumping the pinned Slang release, run
+`just fetch-static` and then `just regen-bindings`. That runs the `xtask`
+package, which is where bindgen lives — it is never published and is not a
+dependency of either library crate, so bindgen and libclang stay out of every
+consumer's build. Regenerating does need libclang locally.
+
+One `bindings.rs` is committed for all three targets. Keeping it
+target-independent is deliberate: the platform introspection macros are
+blocklisted, the enum `#[repr]`s are normalized to the Itanium result (MSVC
+gives unfixed unscoped enums `int` where the Itanium ABI gives `unsigned int`;
+both are 32-bit, so the ABI is unchanged), and the bindgen Rust target and
+edition are pinned so output does not vary with the local toolchain. CI
+regenerates on Linux, macOS, and Windows and diffs the result, which is what
+proves the single committed file is valid everywhere.
+
 ## Credits
 
 Maintained by Lauro Oyen ([@laurooyen](https://github.com/laurooyen)).
