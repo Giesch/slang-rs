@@ -121,6 +121,8 @@ fn regenerate_bindings() {
         })
         .constified_enum("SlangProfileID")
         .constified_enum("SlangCapabilityID")
+        .bitfield_enum("SlangResourceShape")
+        .bitfield_enum("SlangBindingType")
         .vtable_generation(true)
         .layout_tests(false)
         .derive_copy(true)
