@@ -1,0 +1,8 @@
+# Revisions to skip when running git blame. Bulk reformats only — nothing that
+# changes behavior belongs here.
+#
+# GitHub honors this file automatically. To use it locally:
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Format with spaces instead of hard tabs (removed rustfmt.toml)
+56771ad0c89a6d13f822f16b2e50d96da5ace8ec
