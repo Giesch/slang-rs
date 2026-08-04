@@ -12,8 +12,6 @@ Supports both the modern compilation and reflection API.
 ```rust
 let global_session = slang::GlobalSession::new().unwrap();
 
-let search_path = std::ffi::CString::new("shaders/directory").unwrap();
-
 // All compiler options are available through this builder.
 let session_options = slang::CompilerOptions::default()
     .optimization(slang::OptimizationLevel::High)
@@ -24,11 +22,10 @@ let target_desc = slang::TargetDesc::default()
     .profile(global_session.find_profile("glsl_450"));
 
 let targets = [target_desc];
-let search_paths = [search_path.as_ptr()];
 
 let session_desc = slang::SessionDesc::default()
     .targets(&targets)
-    .search_paths(&search_paths)
+    .search_paths(["shaders/directory"])
     .options(&session_options);
 
 let session = global_session.create_session(&session_desc).unwrap();
