@@ -162,7 +162,9 @@ impl TypeLayout {
     }
 
     pub fn binding_range_type(&self, index: i64) -> BindingType {
-        rcall!(spReflectionTypeLayout_getBindingRangeType(self, index))
+        BindingType::from_raw(rcall!(spReflectionTypeLayout_getBindingRangeType(
+            self, index
+        )))
     }
 
     pub fn is_binding_range_specializable(&self, index: i64) -> bool {
@@ -272,10 +274,12 @@ impl TypeLayout {
         set_index: i64,
         range_index: i64,
     ) -> BindingType {
-        rcall!(spReflectionTypeLayout_getDescriptorSetDescriptorRangeType(
-            self,
-            set_index,
-            range_index
+        BindingType::from_raw(rcall!(
+            spReflectionTypeLayout_getDescriptorSetDescriptorRangeType(
+                self,
+                set_index,
+                range_index
+            )
         ))
     }
 

@@ -1,6 +1,6 @@
 # 01 — Bitfield-shaped enums (`SlangResourceShape`, `SlangBindingType`)
 
-Status: proposed
+Status: implemented (steps 1-5)
 Scope: `slang-sys` bindings (`xtask` bindgen config) + `shader-slang` wrapper
 Upstream: [FloatyMonkey/slang-rs#28](https://github.com/FloatyMonkey/slang-rs/issues/28)
 
@@ -196,11 +196,21 @@ shape or binding type. Decide one of:
 Prefer the first unless `Giesch/vulkan-slang-renderer` serializes reflection data
 somewhere a human reads it.
 
+Taken: the first. `ResourceShape`/`BindingType` derive serde behind the feature
+and, being newtypes over the sys newtypes, serialize as bare numbers.
+`BaseShape`/`BaseBindingType` derive it too, so a consumer that wants readable
+output can serialize the decoded value instead. This added an optional `serde`
+dependency to `shader-slang` itself, which previously only forwarded the feature
+to `shader-slang-sys`.
+
 ### 5. Update the README
 
 The README does not currently mention either type, so this is only warranted if
 step 4 changes serde output — in which case note it wherever the `serde` feature
 is described.
+
+Taken: skipped. The README describes neither type nor the `serde` feature, so
+there is no place the changed representation belongs.
 
 ## Verification
 
@@ -214,6 +224,13 @@ is described.
   the 0x102 in issue #28), then assert in `src/tests.rs` that `base()` and the
   predicates decompose each correctly. Note this changes the existing
   `assert_eq!(reflection.parameter_count(), 3)` at `src/tests.rs:39` — update it.
+
+  Done: the three parameters reflect as `TEXTURE_2D | ARRAY` (0x42),
+  `TEXTURE_2D | COMBINED` (0x102, the issue #28 value) and
+  `TEXTURE_2D | SHADOW | COMBINED` (0x122), and the count is now 6. The samplers
+  need explicit-LOD sampling (`SampleLevel`/`SampleCmpLevelZero`) because the
+  fixture is a `numthreads(1, 1, 1)` compute shader with no implicit
+  derivatives.
 - Before/after check against the original repro: the asserts in
   `Giesch/vulkan-tutorial-ash-sdl` on the `resource-shape-example` branch,
   `src/shaders/reflection/parameters.rs:233-246`. Running the pre-fix build under

@@ -1655,35 +1655,62 @@ pub enum SlangDeclKind {
     Enum = 7,
 }
 pub type SlangResourceShapeIntegral = ::std::os::raw::c_uint;
-#[repr(u32)]
+impl SlangResourceShape {
+    pub const SlangResourceBaseShapeMask: SlangResourceShape = SlangResourceShape(15);
+    pub const SlangResourceNone: SlangResourceShape = SlangResourceShape(0);
+    pub const SlangTexture1d: SlangResourceShape = SlangResourceShape(1);
+    pub const SlangTexture2d: SlangResourceShape = SlangResourceShape(2);
+    pub const SlangTexture3d: SlangResourceShape = SlangResourceShape(3);
+    pub const SlangTextureCube: SlangResourceShape = SlangResourceShape(4);
+    pub const SlangTextureBuffer: SlangResourceShape = SlangResourceShape(5);
+    pub const SlangStructuredBuffer: SlangResourceShape = SlangResourceShape(6);
+    pub const SlangByteAddressBuffer: SlangResourceShape = SlangResourceShape(7);
+    pub const SlangResourceUnknown: SlangResourceShape = SlangResourceShape(8);
+    pub const SlangAccelerationStructure: SlangResourceShape = SlangResourceShape(9);
+    pub const SlangTextureSubpass: SlangResourceShape = SlangResourceShape(10);
+    pub const SlangResourceExtShapeMask: SlangResourceShape = SlangResourceShape(496);
+    pub const SlangTextureFeedbackFlag: SlangResourceShape = SlangResourceShape(16);
+    pub const SlangTextureShadowFlag: SlangResourceShape = SlangResourceShape(32);
+    pub const SlangTextureArrayFlag: SlangResourceShape = SlangResourceShape(64);
+    pub const SlangTextureMultisampleFlag: SlangResourceShape = SlangResourceShape(128);
+    pub const SlangTextureCombinedFlag: SlangResourceShape = SlangResourceShape(256);
+    pub const SlangTexture1dArray: SlangResourceShape = SlangResourceShape(65);
+    pub const SlangTexture2dArray: SlangResourceShape = SlangResourceShape(66);
+    pub const SlangTextureCubeArray: SlangResourceShape = SlangResourceShape(68);
+    pub const SlangTexture2dMultisample: SlangResourceShape = SlangResourceShape(130);
+    pub const SlangTexture2dMultisampleArray: SlangResourceShape = SlangResourceShape(194);
+    pub const SlangTextureSubpassMultisample: SlangResourceShape = SlangResourceShape(138);
+}
+impl ::std::ops::BitOr<SlangResourceShape> for SlangResourceShape {
+    type Output = Self;
+    #[inline]
+    fn bitor(self, other: Self) -> Self {
+        SlangResourceShape(self.0 | other.0)
+    }
+}
+impl ::std::ops::BitOrAssign for SlangResourceShape {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: SlangResourceShape) {
+        self.0 |= rhs.0;
+    }
+}
+impl ::std::ops::BitAnd<SlangResourceShape> for SlangResourceShape {
+    type Output = Self;
+    #[inline]
+    fn bitand(self, other: Self) -> Self {
+        SlangResourceShape(self.0 & other.0)
+    }
+}
+impl ::std::ops::BitAndAssign for SlangResourceShape {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: SlangResourceShape) {
+        self.0 &= rhs.0;
+    }
+}
+#[repr(transparent)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub enum SlangResourceShape {
-    SlangResourceBaseShapeMask = 15,
-    SlangResourceNone = 0,
-    SlangTexture1d = 1,
-    SlangTexture2d = 2,
-    SlangTexture3d = 3,
-    SlangTextureCube = 4,
-    SlangTextureBuffer = 5,
-    SlangStructuredBuffer = 6,
-    SlangByteAddressBuffer = 7,
-    SlangResourceUnknown = 8,
-    SlangAccelerationStructure = 9,
-    SlangTextureSubpass = 10,
-    SlangResourceExtShapeMask = 496,
-    SlangTextureFeedbackFlag = 16,
-    SlangTextureShadowFlag = 32,
-    SlangTextureArrayFlag = 64,
-    SlangTextureMultisampleFlag = 128,
-    SlangTextureCombinedFlag = 256,
-    SlangTexture1dArray = 65,
-    SlangTexture2dArray = 66,
-    SlangTextureCubeArray = 68,
-    SlangTexture2dMultisample = 130,
-    SlangTexture2dMultisampleArray = 194,
-    SlangTextureSubpassMultisample = 138,
-}
+pub struct SlangResourceShape(pub SlangResourceShapeIntegral);
 pub type SlangResourceAccessIntegral = ::std::os::raw::c_uint;
 #[repr(u32)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1751,32 +1778,59 @@ pub enum SlangParameterCategory {
 }
 #[doc = " Types of API-managed bindings that a parameter might use.\n\n`SlangBindingType` represents the distinct types of binding ranges that might be\nunderstood by an underlying graphics API or cross-API abstraction layer.\nSeveral of the enumeration cases here correspond to cases of `VkDescriptorType`\ndefined by the Vulkan API. Note however that the values of this enumeration\nare not the same as those of any particular API.\n\nThe `SlangBindingType` enumeration is distinct from `SlangParameterCategory`\nbecause `SlangParameterCategory` differentiates the types of parameters for\nthe purposes of layout, where the layout rules of some targets will treat\nparameters of different types as occupying the same binding space for layout\n(e.g., in SPIR-V both a `Texture2D` and `SamplerState` use the same space of\n`binding` indices, and are not allowed to overlap), while those same types\nmap to different types of bindings in the API (e.g., both textures and samplers\nuse different `VkDescriptorType` values).\n\nWhen you want to answer \"what register/binding did this parameter use?\" you\nshould use `SlangParameterCategory`.\n\nWhen you want to answer \"what type of descriptor range should this parameter use?\"\nyou should use `SlangBindingType`."]
 pub type SlangBindingTypeIntegral = SlangUInt32;
-#[repr(u32)]
+impl SlangBindingType {
+    pub const Unknown: SlangBindingType = SlangBindingType(0);
+    pub const Sampler: SlangBindingType = SlangBindingType(1);
+    pub const Texture: SlangBindingType = SlangBindingType(2);
+    pub const ConstantBuffer: SlangBindingType = SlangBindingType(3);
+    pub const ParameterBlock: SlangBindingType = SlangBindingType(4);
+    pub const TypedBuffer: SlangBindingType = SlangBindingType(5);
+    pub const RawBuffer: SlangBindingType = SlangBindingType(6);
+    pub const CombinedTextureSampler: SlangBindingType = SlangBindingType(7);
+    pub const InputRenderTarget: SlangBindingType = SlangBindingType(8);
+    pub const InlineUniformData: SlangBindingType = SlangBindingType(9);
+    pub const RayTracingAccelerationStructure: SlangBindingType = SlangBindingType(10);
+    pub const VaryingInput: SlangBindingType = SlangBindingType(11);
+    pub const VaryingOutput: SlangBindingType = SlangBindingType(12);
+    pub const ExistentialValue: SlangBindingType = SlangBindingType(13);
+    pub const PushConstant: SlangBindingType = SlangBindingType(14);
+    pub const MutableFlag: SlangBindingType = SlangBindingType(256);
+    pub const MutableTeture: SlangBindingType = SlangBindingType(258);
+    pub const MutableTypedBuffer: SlangBindingType = SlangBindingType(261);
+    pub const MutableRawBuffer: SlangBindingType = SlangBindingType(262);
+    pub const BaseMask: SlangBindingType = SlangBindingType(255);
+    pub const ExtMask: SlangBindingType = SlangBindingType(65280);
+}
+impl ::std::ops::BitOr<SlangBindingType> for SlangBindingType {
+    type Output = Self;
+    #[inline]
+    fn bitor(self, other: Self) -> Self {
+        SlangBindingType(self.0 | other.0)
+    }
+}
+impl ::std::ops::BitOrAssign for SlangBindingType {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: SlangBindingType) {
+        self.0 |= rhs.0;
+    }
+}
+impl ::std::ops::BitAnd<SlangBindingType> for SlangBindingType {
+    type Output = Self;
+    #[inline]
+    fn bitand(self, other: Self) -> Self {
+        SlangBindingType(self.0 & other.0)
+    }
+}
+impl ::std::ops::BitAndAssign for SlangBindingType {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: SlangBindingType) {
+        self.0 &= rhs.0;
+    }
+}
+#[repr(transparent)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub enum SlangBindingType {
-    Unknown = 0,
-    Sampler = 1,
-    Texture = 2,
-    ConstantBuffer = 3,
-    ParameterBlock = 4,
-    TypedBuffer = 5,
-    RawBuffer = 6,
-    CombinedTextureSampler = 7,
-    InputRenderTarget = 8,
-    InlineUniformData = 9,
-    RayTracingAccelerationStructure = 10,
-    VaryingInput = 11,
-    VaryingOutput = 12,
-    ExistentialValue = 13,
-    PushConstant = 14,
-    MutableFlag = 256,
-    MutableTeture = 258,
-    MutableTypedBuffer = 261,
-    MutableRawBuffer = 262,
-    BaseMask = 255,
-    ExtMask = 65280,
-}
+pub struct SlangBindingType(pub SlangBindingTypeIntegral);
 pub type SlangLayoutRulesIntegral = SlangUInt32;
 #[repr(u32)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -10,9 +10,10 @@ publish = false
 
 [dependencies]
 shader-slang-sys = { path = "slang-sys", version = "0.1.0" }
+serde = { version = "1", features = ["derive"], optional = true }
 
 [features]
-serde = ["shader-slang-sys/serde"]
+serde = ["dep:serde", "shader-slang-sys/serde"]
 
 [workspace]
 members = ["slang-sys", "xtask"]
