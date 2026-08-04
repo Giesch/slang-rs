@@ -14,6 +14,9 @@ serde = { version = "1", features = ["derive"], optional = true }
 link-cplusplus = "1"
 
 [build-dependencies]
+# Pinned exactly: src/bindings.rs is committed and CI diffs regenerated output
+# against it, so a floating bindgen version would break the check.
+bindgen = { version = "=0.72.1", optional = true }
 # Pure-Rust extraction of the vendored .tar.xz release archives.
 lzma-rs = "0.3"
 tar = "0.4"
@@ -21,3 +24,4 @@ sha2 = "0.10"
 
 [features]
 serde = ["dep:serde"]
+regenerate-bindings = ["dep:bindgen"]
