@@ -153,4 +153,10 @@ impl Shader {
     pub fn global_params_var_layout(&self) -> Option<&VariableLayout> {
         rcall!(spReflection_getGlobalParamsVarLayout(self) as Option<&VariableLayout>)
     }
+
+    /// Descriptor set / space index reserved for the bindless resource heap,
+    /// or `-1` if no bindless heap space was reserved for this program layout.
+    pub fn bindless_space_index(&self) -> i64 {
+        rcall!(spReflection_getBindlessSpaceIndex(self))
+    }
 }

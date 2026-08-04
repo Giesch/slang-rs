@@ -815,4 +815,5 @@ impl CompilerOptions {
     // Experimental
     option!(NoMangle, no_mangle(enable: bool));
     option!(ValidateUniformity, validate_uniformity(enable: bool));
+    option!(BindlessSpaceIndex, bindless_space_index(index: i32));
 }
