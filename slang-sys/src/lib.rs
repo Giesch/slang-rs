@@ -3,7 +3,6 @@
 #![cfg_attr(rustfmt, rustfmt_skip)]
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 
-#[cfg(feature = "static")]
 extern crate link_cplusplus;
 include!("bindings.rs");
 

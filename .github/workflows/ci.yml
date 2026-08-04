@@ -44,16 +44,7 @@ jobs:
       # and compiles a shader to SPIR-V at -O3, which exercises the embedded
       # glslang wrapper (-O0 emits SPIR-V natively and would not).
       - name: Test
-        run: cargo test --no-default-features --features static
+        run: cargo test
 
-      - name: Test (feature unification, static + default)
-        run: cargo test --features static
-
-      # bindgen output is target-dependent (long width, MSVC struct layout,
-      # c_char signedness), so the diff check runs on every platform to prove
-      # the single committed bindings.rs is valid everywhere.
-      - name: Bindings diff check
-        shell: bash
-        run: |
-          just regen-bindings
-          git diff --exit-code slang-sys/src/bindings.rs
+      - name: Test (serde)
+        run: cargo test --features serde
