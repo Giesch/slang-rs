@@ -203,7 +203,7 @@ impl GlobalSession {
 
     pub fn create_session(&self, desc: &SessionDesc) -> Option<Session> {
         let mut session = null_mut();
-        vcall!(self, createSession(&**desc, &mut session));
+        vcall!(self, createSession(&desc.inner, &mut session));
         Some(Session(IUnknown(std::ptr::NonNull::new(
             session as *mut _,
         )?)))
@@ -637,18 +637,13 @@ impl<'a> TargetDesc<'a> {
     }
 }
 
-#[repr(transparent)]
 pub struct SessionDesc<'a> {
     inner: sys::slang_SessionDesc,
+    /// Backing storage for `search_path_ptrs`; never read directly.
+    _search_path_strings: Vec<CString>,
+    /// The array `inner.searchPaths` points at.
+    search_path_ptrs: Vec<*const c_char>,
     _phantom: PhantomData<&'a ()>,
-}
-
-impl std::ops::Deref for SessionDesc<'_> {
-    type Target = sys::slang_SessionDesc;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
 }
 
 impl Default for SessionDesc<'_> {
@@ -658,6 +653,8 @@ impl Default for SessionDesc<'_> {
                 structureSize: std::mem::size_of::<sys::slang_SessionDesc>(),
                 ..unsafe { std::mem::zeroed() }
             },
+            _search_path_strings: Vec::new(),
+            search_path_ptrs: Vec::new(),
             _phantom: PhantomData,
         }
     }
@@ -670,9 +667,27 @@ impl<'a> SessionDesc<'a> {
         self
     }
 
-    pub fn search_paths(mut self, paths: &'a [*const c_char]) -> Self {
-        self.inner.searchPaths = paths.as_ptr();
-        self.inner.searchPathCount = paths.len() as _;
+    /// Sets the search paths, replacing any previously set. Paths are copied into
+    /// this `SessionDesc`, which owns them for as long as it lives.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any path contains an interior nul byte.
+    pub fn search_paths<P: AsRef<str>>(mut self, paths: impl IntoIterator<Item = P>) -> Self {
+        self._search_path_strings = paths
+            .into_iter()
+            .map(|p| CString::new(p.as_ref()).expect("search path contains an interior nul byte"))
+            .collect();
+
+        self.search_path_ptrs = self
+            ._search_path_strings
+            .iter()
+            .map(|s| s.as_ptr())
+            .collect();
+
+        self.inner.searchPaths = self.search_path_ptrs.as_ptr();
+        self.inner.searchPathCount = self.search_path_ptrs.len() as _;
+
         self
     }
 

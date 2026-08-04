@@ -1,6 +1,6 @@
 # 02 — `SessionDesc::search_paths` soundness
 
-Status: proposed
+Status: implemented on this branch (steps 1–5)
 Scope: `shader-slang` public API
 Upstream: [FloatyMonkey/slang-rs#31](https://github.com/FloatyMonkey/slang-rs/issues/31),
 with an open fix in [#34](https://github.com/FloatyMonkey/slang-rs/pull/34)
@@ -169,6 +169,14 @@ Confirm nothing else takes raw pointers from safe callers. As of this branch the
 only other `*const c_char` in `src/lib.rs` is `push_strings` (`:731`), which is
 private and whose two callers own their `CString`s — no change needed. Record the
 result so the audit is not repeated.
+
+**Audit result (done):** `grep -rnE 'pub (unsafe )?fn [^(]*\([^)]*\*' src/` matches
+nothing across `src/lib.rs` and all twelve `src/reflection/*.rs` modules — after
+this change, no public function in the crate takes a raw pointer from a caller.
+The remaining raw pointers are all outputs of the FFI (returned `*const c_char`
+converted through `CStr` before crossing the public boundary) or private
+plumbing. Do not repeat this audit; re-run the grep only if a new public
+`fn` gains a pointer parameter.
 
 ## Verification
 
