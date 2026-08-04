@@ -1,11 +1,12 @@
 [package]
 name = "shader-slang"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Rust bindings for the Slang shader language compiler"
-repository = "https://github.com/FloatyMonkey/slang-rs"
+repository = "https://github.com/Giesch/slang-rs"
 license = "MIT OR Apache-2.0"
 categories = ["compilers", "api-bindings"]
+publish = false
 
 [dependencies]
 shader-slang-sys = { path = "slang-sys", version = "0.1.0" }
