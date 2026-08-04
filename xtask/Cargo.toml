@@ -1,0 +1,12 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# Pinned exactly: slang-sys/src/bindings.rs is committed and CI diffs
+# regenerated output against it, so a floating bindgen version would break the
+# check. Kept out of shader-slang-sys entirely: regenerating is a maintainer
+# operation, so consumers never resolve bindgen or need libclang.
+bindgen = "=0.72.1"
