@@ -80,7 +80,7 @@ impl Type {
     }
 
     pub fn resource_shape(&self) -> ResourceShape {
-        rcall!(spReflectionType_GetResourceShape(self))
+        ResourceShape::from_raw(rcall!(spReflectionType_GetResourceShape(self)))
     }
 
     pub fn resource_access(&self) -> ResourceAccess {

@@ -1,6 +1,7 @@
 //! Rust bindings for the Slang shader language compiler
 
 pub mod reflection;
+mod resource_shape;
 
 #[cfg(test)]
 mod tests;
@@ -11,15 +12,16 @@ use std::ptr::{null, null_mut};
 
 pub(crate) use shader_slang_sys as sys;
 
+pub use resource_shape::{BaseBindingType, BaseShape, BindingType, ResourceShape};
+
 pub use sys::{
-    SlangBindingType as BindingType, SlangCompileTarget as CompileTarget,
-    SlangDebugInfoLevel as DebugInfoLevel, SlangDeclKind as DeclKind,
-    SlangFloatingPointMode as FloatingPointMode, SlangImageFormat as ImageFormat,
-    SlangLayoutRules as LayoutRules, SlangLineDirectiveMode as LineDirectiveMode,
-    SlangMatrixLayoutMode as MatrixLayoutMode, SlangModifierID as ModifierID,
-    SlangOptimizationLevel as OptimizationLevel, SlangParameterCategory as ParameterCategory,
-    SlangReflectionGenericArg as GenericArg, SlangReflectionGenericArgType as GenericArgType,
-    SlangResourceAccess as ResourceAccess, SlangResourceShape as ResourceShape,
+    SlangCompileTarget as CompileTarget, SlangDebugInfoLevel as DebugInfoLevel,
+    SlangDeclKind as DeclKind, SlangFloatingPointMode as FloatingPointMode,
+    SlangImageFormat as ImageFormat, SlangLayoutRules as LayoutRules,
+    SlangLineDirectiveMode as LineDirectiveMode, SlangMatrixLayoutMode as MatrixLayoutMode,
+    SlangModifierID as ModifierID, SlangOptimizationLevel as OptimizationLevel,
+    SlangParameterCategory as ParameterCategory, SlangReflectionGenericArg as GenericArg,
+    SlangReflectionGenericArgType as GenericArgType, SlangResourceAccess as ResourceAccess,
     SlangScalarType as ScalarType, SlangSourceLanguage as SourceLanguage, SlangStage as Stage,
     SlangTypeKind as TypeKind, SlangUUID as UUID, slang_CompilerOptionName as CompilerOptionName,
     slang_Modifier as Modifier,
