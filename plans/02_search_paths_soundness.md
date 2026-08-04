@@ -1,6 +1,6 @@
 # 02 — `SessionDesc::search_paths` soundness
 
-Status: proposed
+Status: implemented on this branch (steps 1–5)
 Scope: `shader-slang` public API
 Upstream: [FloatyMonkey/slang-rs#31](https://github.com/FloatyMonkey/slang-rs/issues/31),
 with an open fix in [#34](https://github.com/FloatyMonkey/slang-rs/pull/34)
@@ -59,19 +59,31 @@ way. This also matches laurooyen's stated direction in the issue #31 thread:
 `&str` where possible, hidden allocation is acceptable, session creation is not
 a hot path.
 
-**Reuse `CompilerOptions`' storage pattern rather than PR #34's `CStringPtr`.**
-PR #34 adds `src/c_string_ptr.rs`, a `#[repr(C)]` newtype over `*mut c_char` with
-`CString::into_raw` in `From` and `CString::from_raw` in `Drop`, then casts
-`Vec<CStringPtr>::as_ptr()` to `*const *const c_char`. That is sound, but it
-leans on three things that need arguing: manual raw ownership, a layout
-equivalence between `CStringPtr` and `*const c_char`, and a `#[repr(C)]`
-annotation carrying real weight.
+**~~Reuse `CompilerOptions`' storage pattern rather than PR #34's `CStringPtr`.~~**
+**Superseded during implementation — adopt PR #34's `CStringPtr` verbatim.**
 
-`CompilerOptions` already solves the identical problem without any of it
-(`src/lib.rs:711`, `:751-769`): keep the `CString`s alive in a `Vec<CString>`
-field, take `.as_ptr()` before moving each into the vector — the heap buffer does
-not move — and store the raw pointer in the FFI struct. Doing the same here needs
-no `unsafe` block at all.
+The original argument was that PR #34's `src/c_string_ptr.rs` — a `#[repr(C)]`
+newtype over `*mut c_char` with `CString::into_raw` in `From` and
+`CString::from_raw` in `Drop`, whose `Vec<CStringPtr>::as_ptr()` is cast to
+`*const *const c_char` — leans on three things that need arguing: manual raw
+ownership, a layout equivalence between `CStringPtr` and `*const c_char`, and a
+`#[repr(C)]` annotation carrying real weight. `CompilerOptions` (`src/lib.rs:711`,
+`:751-769`) solves the identical problem with a plain `Vec<CString>` and no
+`unsafe` at all.
+
+That reasoning still holds on its own terms, but it was weighed against the wrong
+thing. Both designs are sound; the choice is really between one extra `Vec` and
+two extra words per path (this fork's version) and a load-bearing `#[repr(C)]`
+(upstream's) — and neither cost is material for a struct built once per session.
+What *is* material is convergence: matching #34 byte-for-byte in the private
+storage as well as the public signature means a future upstream merge is a
+no-op rather than a conflict resolution, which is the stated goal below.
+
+So: take #34's file and function body as-is. The layout cast is verified under
+Miri (see Verification) rather than argued. Two deliberate deviations, both
+one-liners: the module is private (`mod c_string_ptr;`) since nothing outside
+the crate can use the type, and `SessionDesc`'s `Deref` impl still goes away per
+the decision below.
 
 **Panic on an interior nul, documented.** Consistent with `push_str1`
 (`src/lib.rs:752`) and `find_profile` (`src/lib.rs:213`), both of which already
@@ -99,25 +111,28 @@ pub struct SessionDesc<'a> {
 }
 ```
 
-Add two fields and drop `#[repr(transparent)]` (no longer true) along with the
-`Deref<Target = sys::slang_SessionDesc>` impl at `src/lib.rs:646-652` (which
-only exists to serve one call site):
+Add PR #34's `src/c_string_ptr.rs` verbatim, behind a private `mod`, then add one
+field and drop `#[repr(transparent)]` (no longer true — two non-ZST fields is a
+hard error) along with the `Deref<Target = sys::slang_SessionDesc>` impl at
+`src/lib.rs:646-652` (which only exists to serve one call site):
 
 ```rust
 pub struct SessionDesc<'a> {
     inner: sys::slang_SessionDesc,
-    /// Backing storage for `search_path_ptrs`; never read directly.
-    _search_path_strings: Vec<CString>,
-    /// The array `inner.searchPaths` points at.
-    search_path_ptrs: Vec<*const c_char>,
+    /// Owns the strings `inner.searchPaths` points at, and is the array itself:
+    /// `CStringPtr` is a `#[repr(C)]` newtype over `*mut c_char`, so a
+    /// `[CStringPtr]` has the layout of a `[*const c_char]`. Never read directly.
+    search_paths: Vec<CStringPtr>,
     _phantom: PhantomData<&'a ()>,
 }
 ```
 
 Keep the `'a`: `targets` (`src/lib.rs:667`) and `options` (`src/lib.rs:679`) still
-borrow. Add both fields to the `Default` impl at `src/lib.rs:654-663`.
+borrow. Add the field to the `Default` impl at `src/lib.rs:654-663`.
 
 ### 2. Rewrite `search_paths`
+
+Body taken verbatim from PR #34; only the `# Panics` doc block is ours.
 
 ```rust
 /// Sets the search paths, replacing any previously set. Paths are copied into
@@ -126,26 +141,38 @@ borrow. Add both fields to the `Default` impl at `src/lib.rs:654-663`.
 /// # Panics
 ///
 /// Panics if any path contains an interior nul byte.
-pub fn search_paths<P: AsRef<str>>(mut self, paths: impl IntoIterator<Item = P>) -> Self {
-    self._search_path_strings = paths
+pub fn search_paths<SearchPath>(mut self, paths: impl IntoIterator<Item = SearchPath>) -> Self
+where
+    SearchPath: AsRef<str>,
+{
+    let paths = paths
         .into_iter()
-        .map(|p| CString::new(p.as_ref()).expect("search path contains an interior nul byte"))
-        .collect();
+        .map(|path| CString::new(path.as_ref()).map(CStringPtr::from))
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .expect("One or more search paths contains an internal nul byte");
 
-    self.search_path_ptrs = self._search_path_strings.iter().map(|s| s.as_ptr()).collect();
-
-    self.inner.searchPaths = self.search_path_ptrs.as_ptr();
-    self.inner.searchPathCount = self.search_path_ptrs.len() as _;
+    self.inner.searchPaths = paths.as_ptr().cast::<*const c_char>();
+    self.inner.searchPathCount = paths.len() as _;
+    self.search_paths = paths;
 
     self
 }
 ```
 
-Order matters: build both vectors to their final length *before* taking
-`as_ptr()`, so no later reallocation invalidates `inner.searchPaths`. Moving the
-`SessionDesc` afterwards is fine — moving a `Vec` does not move its heap buffer.
-Assigning both fields wholesale (rather than pushing) also makes the
-replace-not-append semantics fall out for free.
+Order matters: `collect` finishes the vector *before* `as_ptr()` is taken, so no
+later reallocation invalidates `inner.searchPaths`. Moving the vector into the
+field afterwards — and moving the `SessionDesc` after that — is fine, since
+moving a `Vec` does not move its heap buffer. Assigning the field wholesale
+(rather than pushing) also makes the replace-not-append semantics fall out for
+free.
+
+Two invariants this storage carries that the `Vec<CString>` version would not,
+worth knowing before editing `c_string_ptr.rs`:
+
+- `CStringPtr` must never gain `Clone` or `Copy`. Each value owns its allocation
+  and frees it in `Drop`; a duplicate is a double free.
+- The `#[repr(C)]` is load-bearing. It is what makes `as_ptr().cast()` legal;
+  removing it does not break the build, it silently invalidates the cast.
 
 ### 3. Fix the one `Deref` call site
 
@@ -170,6 +197,14 @@ only other `*const c_char` in `src/lib.rs` is `push_strings` (`:731`), which is
 private and whose two callers own their `CString`s — no change needed. Record the
 result so the audit is not repeated.
 
+**Audit result (done):** `grep -rnE 'pub (unsafe )?fn [^(]*\([^)]*\*' src/` matches
+nothing across `src/lib.rs` and all twelve `src/reflection/*.rs` modules — after
+this change, no public function in the crate takes a raw pointer from a caller.
+The remaining raw pointers are all outputs of the FFI (returned `*const c_char`
+converted through `CStr` before crossing the public boundary) or private
+plumbing. Do not repeat this audit; re-run the grep only if a new public
+`fn` gains a pointer parameter.
+
 ## Verification
 
 - `cargo test` on all three CI platforms. The existing `compile` test genuinely
@@ -183,6 +218,14 @@ result so the audit is not repeated.
   dropped `CString`s — must no longer typecheck. A `trybuild` case is overkill;
   confirming manually and noting it in the commit message is enough.
 - `cargo test --features serde` for completeness; this touches no serde surface.
+- Miri, since the storage now owns raw allocations and reads the array back
+  through a layout cast rather than avoiding both. `cargo +nightly miri test
+  search_paths_` runs the five non-FFI tests (the three that call into Slang are
+  filtered out — Miri cannot execute foreign functions). The helper the tests
+  read results through walks `inner.searchPaths` element by element, so this
+  exercises the `as_ptr().cast()` and the `into_raw`/`from_raw` pairing directly.
+  Passes under both Stacked Borrows and, with
+  `MIRIFLAGS="-Zmiri-tree-borrows -Zmiri-strict-provenance"`, Tree Borrows.
 
 ## Risks
 
@@ -192,13 +235,21 @@ consumed by git tag rather than crates.io — so the blast radius is
 `Giesch/vulkan-slang-renderer`. Bundle it into the same release as
 `plans/01_resource_shape_bitflags.md` so consumers absorb one breaking bump.
 
-**Divergence from upstream PR #34.** Same public signature, different private
-storage, plus this fork keeps `search_paths` mandatory-free. If #34 lands
-upstream the merge will conflict in `src/lib.rs`; resolve toward whichever
-implementation is simpler at that point — the signatures already agree, so this
-is a small conflict by construction.
+**~~Divergence from upstream PR #34.~~ Resolved by adopting #34's implementation.**
+`src/c_string_ptr.rs` and the body of `search_paths` are byte-for-byte upstream's;
+the only deviations are that the module is private here and that this fork also
+removes `SessionDesc`'s `Deref` impl. If #34 lands upstream, the merge should be
+close to a no-op. If it is instead revised before landing, re-sync to whatever
+merges rather than defending this copy.
 
-**`_search_path_strings` is dead-read.** It exists only to own the buffers, and
-nothing reads it, so it will draw a `dead_code` warning unless the underscore
-prefix is kept. Do not "clean it up" — deleting it reintroduces exactly the bug
-this plan closes. The doc comment above it says so.
+**`#[repr(C)]` on `CStringPtr` is silently load-bearing.** Deleting it or
+switching `CStringPtr` to a multi-field struct leaves the crate compiling while
+invalidating the `as_ptr().cast::<*const c_char>()` in `search_paths`. Likewise,
+deriving `Clone` or `Copy` on `CStringPtr` compiles and double-frees. The Miri
+job in Verification is the backstop for both; keep running it when this file
+changes.
+
+**`SessionDesc::search_paths` is a dead-read field.** Nothing in the crate reads
+it back; it exists so the allocations outlive the descriptor. Do not "clean it
+up" — deleting it reintroduces exactly the bug this plan closes. The doc comment
+above it says so.

@@ -1,10 +1,12 @@
 //! Rust bindings for the Slang shader language compiler
 
+mod c_string_ptr;
 pub mod reflection;
 
 #[cfg(test)]
 mod tests;
 
+use crate::c_string_ptr::CStringPtr;
 use std::ffi::{CStr, CString, c_char};
 use std::marker::PhantomData;
 use std::ptr::{null, null_mut};
@@ -203,7 +205,7 @@ impl GlobalSession {
 
     pub fn create_session(&self, desc: &SessionDesc) -> Option<Session> {
         let mut session = null_mut();
-        vcall!(self, createSession(&**desc, &mut session));
+        vcall!(self, createSession(&desc.inner, &mut session));
         Some(Session(IUnknown(std::ptr::NonNull::new(
             session as *mut _,
         )?)))
@@ -637,18 +639,13 @@ impl<'a> TargetDesc<'a> {
     }
 }
 
-#[repr(transparent)]
 pub struct SessionDesc<'a> {
     inner: sys::slang_SessionDesc,
+    /// Owns the strings `inner.searchPaths` points at, and is the array itself:
+    /// `CStringPtr` is a `#[repr(C)]` newtype over `*mut c_char`, so a
+    /// `[CStringPtr]` has the layout of a `[*const c_char]`. Never read directly.
+    search_paths: Vec<CStringPtr>,
     _phantom: PhantomData<&'a ()>,
-}
-
-impl std::ops::Deref for SessionDesc<'_> {
-    type Target = sys::slang_SessionDesc;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
 }
 
 impl Default for SessionDesc<'_> {
@@ -658,6 +655,7 @@ impl Default for SessionDesc<'_> {
                 structureSize: std::mem::size_of::<sys::slang_SessionDesc>(),
                 ..unsafe { std::mem::zeroed() }
             },
+            search_paths: Vec::new(),
             _phantom: PhantomData,
         }
     }
@@ -670,9 +668,26 @@ impl<'a> SessionDesc<'a> {
         self
     }
 
-    pub fn search_paths(mut self, paths: &'a [*const c_char]) -> Self {
-        self.inner.searchPaths = paths.as_ptr();
+    /// Sets the search paths, replacing any previously set. Paths are copied into
+    /// this `SessionDesc`, which owns them for as long as it lives.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any path contains an interior nul byte.
+    pub fn search_paths<SearchPath>(mut self, paths: impl IntoIterator<Item = SearchPath>) -> Self
+    where
+        SearchPath: AsRef<str>,
+    {
+        let paths = paths
+            .into_iter()
+            .map(|path| CString::new(path.as_ref()).map(CStringPtr::from))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .expect("One or more search paths contains an internal nul byte");
+
+        self.inner.searchPaths = paths.as_ptr().cast::<*const c_char>();
         self.inner.searchPathCount = paths.len() as _;
+        self.search_paths = paths;
+
         self
     }
 
