@@ -1,6 +1,11 @@
 # 00 — Static Slang via vendored prebuilt libraries
 
 Status: implemented on this branch (steps 1–8); first release not yet cut
+
+Note: kept as a record of how the static build was arrived at. The
+`dynamic`/`static`/`regenerate-bindings` features it describes have since been
+removed — the vendored static build is now the only build, and bindings are
+committed without a way to regenerate them from this repo.
 Scope: `Giesch/slang-rs` (this repo), with a follow-on bump in `Giesch/vulkan-slang-renderer`
 
 ## Goal
