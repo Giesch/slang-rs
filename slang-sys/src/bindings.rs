@@ -646,7 +646,9 @@ pub enum slang_CompilerOptionName {
     CompilerVersion = 153,
     SPIRVUnifiedDescriptorHeapStride = 154,
     WarningLevel = 155,
-    CountOf = 156,
+    SeparateDebugInfoOutput = 156,
+    DebugInfoIncludeSource = 157,
+    CountOf = 158,
 }
 #[repr(i32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -2334,15 +2336,18 @@ unsafe extern "C" {
     ) -> *mut SlangReflectionUserAttribute;
 }
 unsafe extern "C" {
+    #[doc = " DEPRECATED: use `slang::VariableReflection::getDefaultValueBlob` and check for a null blob\n instead."]
     pub fn spReflectionVariable_HasDefaultValue(inVar: *mut SlangReflectionVariable) -> bool;
 }
 unsafe extern "C" {
+    #[doc = " DEPRECATED: use `slang::VariableReflection::getDefaultValueBlob` instead."]
     pub fn spReflectionVariable_GetDefaultValueInt(
         inVar: *mut SlangReflectionVariable,
         rs: *mut i64,
     ) -> SlangResult;
 }
 unsafe extern "C" {
+    #[doc = " DEPRECATED: use `slang::VariableReflection::getDefaultValueBlob` instead."]
     pub fn spReflectionVariable_GetDefaultValueFloat(
         inVar: *mut SlangReflectionVariable,
         rs: *mut f32,

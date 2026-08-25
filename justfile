@@ -4,7 +4,7 @@
 # a gitignored directory for development and CI; `release` commits them on a
 # tag-only commit that never lands on `main`. See plans/00_static_build.md.
 
-slang_version := "2026.13.1"
+slang_version := "2026.16"
 slang_release := "v" + slang_version + "-static"
 slang_repo := "https://github.com/Giesch/slang"
 vendor := "slang-sys/vendor"

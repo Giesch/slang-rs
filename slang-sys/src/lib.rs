@@ -8,7 +8,7 @@ include!("bindings.rs");
 
 use std::ffi::{c_char, c_int, c_void};
 
-// Based on Slang version 2024.14.5
+// Based on Slang version 2026.16
 
 #[repr(C)]
 pub struct ICastableVtable {
